@@ -115,3 +115,40 @@ function updatePreview(){
 }
 function startup(){composer();document.documentElement.dataset.theme=state.theme;document.querySelector<HTMLButtonElement>('#theme')!.onclick=async()=>{const previous=state.theme;state.theme=state.theme==='system'?'dark':state.theme==='dark'?'light':'system';try{await persist();document.documentElement.dataset.theme=state.theme;status(`表示テーマ: ${state.theme==='system'?'OS設定':state.theme==='dark'?'ダーク':'ライト'}`);}catch(e){state.theme=previous;status((e as Error).message);}};}
 document.addEventListener('app-ready',startup,{once:true});
+
+import { intentURL, validateImages } from './x';
+import { isTauri } from '@tauri-apps/api/core';
+function xActions(){
+ document.querySelector('#actions')!.innerHTML=`<label>画像を選択（最大4枚）<input id="images" type="file" accept="image/jpeg,image/png,image/gif,image/webp" multiple></label><button id="clearImages">画像を解除</button><p class="hint">画像はXに自動添付されません。下の元ファイル名を確認し、X画面で手動添付してください。画像は保存されません。</p><label><input id="confirmed" type="checkbox">文章・商品情報・入荷日・画像を担当者が確認しました</label><button id="copy" class="primary" disabled>文章をコピー</button><button id="openX" disabled>Xの投稿画面へ移動</button><button id="saveHistory">作成履歴に保存</button><p class="hint">Xへのログイン・最終投稿はブラウザで行ってください。自動投稿は行いません。</p>`;
+ const text=()=>(document.querySelector('#text') as HTMLTextAreaElement).value;
+ const confirmed=document.querySelector<HTMLInputElement>('#confirmed')!;
+ let urls:string[]=[];
+ function enabled(){const valid=confirmed.checked&&countText(text()).valid;for(const id of ['copy','openX'])(document.getElementById(id) as HTMLButtonElement).disabled=!valid;}
+ function reset(){confirmed.checked=false;enabled();}
+ document.addEventListener('post-changed',reset);confirmed.onchange=enabled;
+ async function record(){
+  if(!text().trim())throw Error('保存する文章がありません');
+  const previous=state.history;state.history=[{id:crypto.randomUUID(),createdAt:new Date().toISOString(),kind:kinds[kind],text:text()},...state.history].slice(0,200);
+  try{await persist();}catch(e){state.history=previous;throw e;}document.dispatchEvent(new Event('history-changed'));
+ }
+ document.querySelector<HTMLButtonElement>('#saveHistory')!.onclick=async()=>{try{await record();status('作成履歴を保存しました（投稿はしていません）');}catch(e){status(`履歴保存失敗: ${(e as Error).message}`);}};
+ document.querySelector<HTMLButtonElement>('#copy')!.onclick=async()=>{try{if(!confirmed.checked)throw Error('最終確認が必要です');intentURL(text());await navigator.clipboard.writeText(text());status('コピーしました。X画面で貼り付けてください');}catch(e){status(`コピー失敗: ${(e as Error).message}`);}};
+ document.querySelector<HTMLButtonElement>('#openX')!.onclick=async()=>{try{
+ if(!confirmed.checked)throw Error('最終確認が必要です');const url=intentURL(text());
+ if(isTauri()){const {openUrl}=await import('@tauri-apps/plugin-opener');await openUrl(url);}else{const popup=window.open(url,'_blank','noopener,noreferrer');void popup;}
+ status('ブラウザで文章を確認し、画像を手動添付してください。投稿操作は担当者が行ってください');
+ }catch(e){status(`X画面を開けませんでした: ${(e as Error).message}`);}};
+ const images=document.querySelector<HTMLInputElement>('#images')!;
+ function clear(){urls.forEach(u=>URL.revokeObjectURL(u));urls=[];images.value='';document.querySelector('#imagePreview')!.innerHTML='';reset();}
+ document.querySelector<HTMLButtonElement>('#clearImages')!.onclick=clear;
+ images.onchange=async()=>{const files=Array.from(images.files??[]);try{
+ validateImages(files);
+ // MIMEだけではなくブラウザで画像として復号できることを確認する。
+ const next=files.map(file=>({file,url:URL.createObjectURL(file)}));
+ try{await Promise.all(next.map(({url})=>new Promise<void>((resolve,reject)=>{const img=new Image();img.onload=()=>resolve();img.onerror=()=>reject(Error('読み込めない画像が含まれています'));img.src=url;})));}catch(e){next.forEach(i=>URL.revokeObjectURL(i.url));throw e;}
+ urls.forEach(u=>URL.revokeObjectURL(u));urls=next.map(i=>i.url);
+ document.querySelector('#imagePreview')!.innerHTML=next.map(({file,url})=>`<div><img class="image" src="${url}" alt="${escape(file.name)}"><small>${escape(file.name)}</small></div>`).join('');reset();
+ }catch(e){clear();status((e as Error).message);}};
+ window.addEventListener('beforeunload',()=>urls.forEach(u=>URL.revokeObjectURL(u)));
+}
+document.addEventListener('app-ready',xActions,{once:true});
