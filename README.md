@@ -1,1 +1,107 @@
-# prize-post-maker
+# プライズポストメーカー
+
+ゲームセンター向けに、Xへの投稿文章をローカルで作るWindows 10/11 x64用アプリです。Tauri 2、HTML/CSS/TypeScript、JSON保存を使用します。X API・OpenAI API・有料APIは使いません。
+
+**投稿するのは担当者です。** 自動ログイン・自動投稿はしません。APIキーやログイン情報を入力・保存する機能もありません。
+
+## はじめて使う方へ
+
+1. このリポジトリの **Actions → Windows portable EXE** を開き、成功した実行の **Artifacts → PrizePostMaker-windows-x64** をダウンロードします。GitHubへのログインが必要な場合があります。
+2. ダウンロードしたArtifactsのZIPを展開し、中の `PrizePostMaker-windows-x64.zip` も展開します。
+3. `prize-post-maker.exe` を起動します。アプリのインストールは不要です。ただし **Microsoft Edge WebView2 Runtime** が必要です。起動できない場合はMicrosoft公式サイトからEvergreen Runtimeを導入してください。署名なしEXEのためSmartScreenで確認される場合があります。
+4. 中央の「商品マスター（登録・編集・CSV）」を開き、商品名、作品名、キャラクター名、メーカー名、確認済み入荷日を登録します。商品名以外は空欄でも使えます。未確認の日付は入力しないでください。
+5. 左のメニューで「月間入荷予定」「当日の入荷・稼働」「完売のお知らせ」「入荷遅延」を選び、商品にチェックします。複数選択できます。月間予定は任意で対象月を指定して絞り込めます。月を変更すると選択は解除されます。
+6. タイトル候補・対象日・当日の状態・備考・テンプレートを設定します。遅延後の日程など、登録項目にない確認済み情報は備考に記入します。空欄情報は自動で創作しません。
+7. 右のプレビューを確認します。作品・キャラクター・メーカーからタグを作ります。タグは編集できます。中央の最終文章も直接編集できます。設定から再生成すると手動編集は置き換わります。
+8. 必要なら画像を選びます。JPEG/PNG/GIF/WebP、最大4枚、1枚5MB以下。GIFは1枚のみです。元ファイル名とプレビューを確認します。画像は今回の起動中だけ保持されます。
+9. 文章・商品・日付・画像を確認し、「担当者が確認しました」にチェックします。「文章をコピー」または「Xの投稿画面へ移動」を使用します。文章や画像を変更すると確認チェックは解除されます。
+10. **X画面で画像の元ファイルを手動添付し、再確認して投稿してください。** intent画面へ画像は渡せません。コピーを使った場合は文章を貼り付けてください。Xへのログインは通常の外部ブラウザで行います。
+
+文字数は通常投稿の重み付き280文字に対応します。日本語は原則2、URLは23、絵文字の一部はまとまりで数えます。空欄・不正な文字・文字数超過ではコピーとX画面への移動を無効にします。X側の最終確認も行ってください。
+
+## テンプレートと履歴
+
+- 標準とコンパクトのテンプレートを同梱しています。本文を編集し、名前を付けて新規保存・上書き保存・削除できます。
+- 変数は `{title}` `{date}` `{products}` `{note}` `{hashtags}` です。
+- 「作成履歴に保存」で文章を保存できます。直近200件を保持し、再利用・削除ができます。**履歴は投稿済みを意味しません。** コピーやX画面への移動だけでは履歴は保存しません。
+- 商品は編集・削除できます。テーマはヘッダーのボタンでOS設定・ダーク・ライトを切り替えます。
+
+## CSV入出力
+
+商品マスターからUTF-8のCSVをインポート／エクスポートできます。最初に空のマスターをエクスポートするとヘッダーの見本を作れます。
+
+```csv
+name,work,character,maker,arrivalDate
+```
+
+`name` は必須、他は空欄可。日付は `2026-11-05` のような実在する `YYYY-MM-DD` 形式です。日付は記入例であり入荷情報ではありません。各項目は200文字以内です。カンマ・引用符・改行はCSVの引用規則で扱います。BOM付きUTF-8に対応しています。
+
+インポートは追加方式です。同じCSVを繰り返すと重複します。1行でもエラーがある場合は全体を取り込みません。上限は5MB・10000行です。表計算ソフトの数式実行を避けるため、エクスポート時に `=` `+` `-` `@` などで始まる値には先頭にアポストロフィを付けます。再インポート時もこの保護文字は残ります。
+
+## 保存場所とバックアップ
+
+Windowsの `%APPDATA%\jp.naganoprize.prizepostmaker\data.json` に商品・テンプレート・履歴・テーマを保存します。**EXEはポータブルですが、データはEXEと同じフォルダーには保存しません。** 別PCへ移すときはアプリを終了し、このフォルダーをバックアップ・移行してください。保存前のデータを `data.json.bak` に残します。画像は保存しません。
+
+読み込みエラー時は上書き保護のため編集を停止します。アプリを終了し、まずフォルダー全体を退避してください。必要なら破損した `data.json` を別名で保管し、正常な `data.json.bak` のコピーを `data.json` にして再起動します。バックアップも不正なら商品CSVなどから復元してください。複数ウィンドウ／プロセスで同時編集しないでください。
+
+ブラウザ開発モードでは、そのブラウザのlocalStorageを使います。デスクトップアプリのJSONとは別で、ブラウザデータ削除により消えます。
+
+## 開発する方へ
+
+設計とファイル構成は [docs/DESIGN.md](docs/DESIGN.md) を参照してください。
+
+### Windowsで開発・ビルド
+
+必要なもの:
+
+- Windows 10/11 x64
+- Node.js 22 LTSとnpm
+- Rust stable（MSVC、rustup公式インストーラー）
+- Visual Studio 2022 Build Toolsの「C++によるデスクトップ開発」とWindows SDK
+- Microsoft Edge WebView2 Runtime
+
+リポジトリを取得し、PowerShellでフォルダーに移動して実行します。
+
+```powershell
+npm ci
+npm test
+npm run build
+cargo test --locked --manifest-path src-tauri/Cargo.toml
+npm run tauri dev
+```
+
+終了するには起動したターミナルでCtrl+Cを押します。ブラウザだけでUI開発する場合は `npm run dev` を使います。
+
+ポータブルEXEのリリースビルド:
+
+```powershell
+rustup target add x86_64-pc-windows-msvc
+npm run tauri build -- --no-bundle --target x86_64-pc-windows-msvc -- --locked
+```
+
+出力は `src-tauri/target/x86_64-pc-windows-msvc/release/prize-post-maker.exe` です。インストーラーやAPIキーは不要です。
+
+### 自動テスト
+
+```powershell
+npm test
+npx playwright install chromium
+npm run test:e2e
+npm run format:check
+```
+
+単体／UIテストはCSV、日付、生成、タグ、X文字数、保存データ検証、Xへの引き渡し、画像制約、確認解除を対象にします。Playwrightは実ブラウザで商品登録・生成・履歴復元・文字数制限・破損保護を確認します。システムのChromiumを使う場合は環境変数 `CHROMIUM_PATH` で実行ファイルを指定できます。
+
+Rustの保存テストは `cargo test --locked --manifest-path src-tauri/Cargo.toml` でJSON保存、バックアップ、破損保護を検証します。LinuxでTauriをビルドする場合は別途WebKitGTK 4.1、GTK 3などの公式前提パッケージが必要です。
+
+### GitHub Actions
+
+[Windowsビルド定義](.github/workflows/windows.yml) は `windows-latest` を使用します。`main` / `work` へのpush、`v*` タグ、pull request、手動実行で動作します。npmのロックファイルで依存を導入し、単体・ブラウザ・Rustテスト後にWindows x64 EXEをビルドし、READMEとともにZIPでArtifactsへ保存します（保持30日）。リリースへの自動公開は行いません。
+
+手動実行はGitHubの **Actions → Windows portable EXE → Run workflow** から行います。初回はActionsの有効化が必要な場合があります。
+
+### 現時点の検証範囲
+
+LinuxクラウドでTypeScript型検査・本番フロントエンドビルド、単体/UIテスト14件、Chromium E2E 2件、独立ハーネスから本番Rust保存モジュールのテスト1件を実行済みです。Tauri設定はCLI同梱のスキーマで検証しています。
+
+クラウドではGUIシステム依存パッケージの導入権限がなく、Tauri全体のネイティブビルドとWindows EXE実行は未検証です。**ActionsでのWindowsビルド成功と、Windows 10/11実機での起動・コピー・外部ブラウザ・画像選択・JSON保存を配布前に確認してください。** このREADMEの記載だけでEXEが生成されたことを意味しません。
