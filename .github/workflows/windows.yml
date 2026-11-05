@@ -37,9 +37,24 @@ jobs:
         run: |
           $exe = 'src-tauri/target/x86_64-pc-windows-msvc/release/prize-post-maker.exe'
           if (!(Test-Path $exe)) { throw 'Portable EXE missing' }
+          $bytes = [System.IO.File]::ReadAllBytes((Resolve-Path $exe))
+          if ($bytes.Length -lt 64 -or $bytes[0] -ne 0x4d -or $bytes[1] -ne 0x5a) { throw 'Invalid Windows executable' }
+          $pe = [BitConverter]::ToInt32($bytes, 0x3c)
+          if ($pe -lt 0 -or $pe + 6 -gt $bytes.Length) { throw 'Invalid PE offset' }
+          if ([BitConverter]::ToUInt32($bytes, $pe) -ne 0x00004550 -or [BitConverter]::ToUInt16($bytes, $pe + 4) -ne 0x8664) { throw 'Expected Windows x64 PE executable' }
+          $text = [System.Text.Encoding]::UTF8.GetString($bytes)
+          $wideText = [System.Text.Encoding]::Unicode.GetString($bytes)
+          foreach ($root in @($env:GITHUB_WORKSPACE, $env:USERPROFILE)) {
+            if (!$root) { continue }
+            foreach ($path in @($root, $root.Replace('\', '/'))) {
+              if ($text.IndexOf($path, [StringComparison]::OrdinalIgnoreCase) -ge 0 -or $wideText.IndexOf($path, [StringComparison]::OrdinalIgnoreCase) -ge 0) { throw 'Build machine absolute path found in EXE' }
+            }
+          }
           New-Item -ItemType Directory -Path portable | Out-Null
           Copy-Item $exe portable/
           Copy-Item README.md portable/
+          $hash = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  prize-post-maker.exe" | Set-Content portable/SHA256SUMS.txt -Encoding ascii
           Compress-Archive -Path portable/* -DestinationPath PrizePostMaker-windows-x64.zip
       - uses: actions/upload-artifact@v4
         with:
