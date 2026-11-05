@@ -87,3 +87,15 @@ test("Xの日本語・URL・絵文字の重み", () => {
   expect(countText("👨‍👩‍👧‍👦").weighted).toBe(2);
   expect(countText("").valid).toBe(false);
 });
+test("登録したタグと商品数を選択商品の生成へ反映する", () => {
+  const registered = product({ ...p, hashtags: ["店舗タグ"] });
+  expect(hashtags([registered])).toContain("#店舗タグ");
+  expect(
+    generate(
+      "{count}商品\n{products}",
+      { title: "", date: "", products: [registered], note: "", hashtags: "" },
+      0,
+    ),
+  ).toContain("1商品");
+  expect(() => product({ ...p, hashtags: [123] })).toThrow("ハッシュタグ");
+});

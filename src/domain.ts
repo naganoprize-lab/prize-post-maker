@@ -9,6 +9,7 @@ export const productStatuses = [
 export type ProductStatus = (typeof productStatuses)[number];
 export interface ExcelMetadata {
   key: string;
+  rowNumber?: number;
   originalName: string;
   originalMaker: string;
   scheduledDate: string;
@@ -28,6 +29,7 @@ export interface Product {
   maker: string;
   arrivalDate: string;
   status?: ProductStatus;
+  hashtags?: string[];
   excel?: ExcelMetadata;
 }
 export interface Template {
@@ -90,6 +92,13 @@ export function product(input: unknown): Product {
     !productStatuses.includes(p.status as ProductStatus)
   )
     throw Error("商品状態が不正です");
+  if (
+    p.hashtags !== undefined &&
+    (!Array.isArray(p.hashtags) ||
+      p.hashtags.length > 20 ||
+      p.hashtags.some((t) => typeof t !== "string" || t.length > 100))
+  )
+    throw Error("登録ハッシュタグが不正です");
   let excel: ExcelMetadata | undefined;
   if (p.excel !== undefined) {
     const e = p.excel as ExcelMetadata;
@@ -101,7 +110,15 @@ export function product(input: unknown): Product {
       typeof e.originalMaker !== "string" ||
       e.originalMaker.length > 200 ||
       !validDate(e.scheduledDate) ||
-      e.key !== excelKey(e.scheduledDate, e.originalName, e.originalMaker) ||
+      (e.rowNumber !== undefined &&
+        (!Number.isSafeInteger(e.rowNumber) || e.rowNumber < 2)) ||
+      e.key !==
+        excelKey(
+          e.scheduledDate,
+          e.originalName,
+          e.originalMaker,
+          e.rowNumber,
+        ) ||
       [e.units, e.cs].some(
         (n) =>
           n !== null &&
@@ -114,15 +131,22 @@ export function product(input: unknown): Product {
   return {
     ...(p.status !== undefined ? { status: p.status } : {}),
     ...(excel ? { excel } : {}),
+    ...(p.hashtags ? { hashtags: p.hashtags } : {}),
     id: typeof p.id === "string" && p.id ? p.id : crypto.randomUUID(),
     ...Object.fromEntries(fields.map((f) => [f, (p[f] as string).trim()])),
   } as Product;
 }
-export function excelKey(date: string, name: string, maker: string): string {
+export function excelKey(
+  date: string,
+  name: string,
+  maker: string,
+  rowNumber?: number,
+): string {
   return JSON.stringify([
     date,
     name.normalize("NFKC").trim(),
     maker.normalize("NFKC").trim(),
+    ...(rowNumber === undefined ? [] : [rowNumber]),
   ]);
 }
 export function importCSV(text: string): Product[] {
@@ -251,7 +275,7 @@ export function titles(kind: number): string[] {
 }
 export function hashtags(products: Product[]): string {
   const tags = products
-    .flatMap((p) => [p.work, p.character, p.maker])
+    .flatMap((p) => [p.work, p.character, p.maker, ...(p.hashtags ?? [])])
     .map((s) => s.normalize("NFKC").replace(/[^\p{L}\p{N}\p{M}_]/gu, ""))
     .filter((s) => s && twitter.extractHashtags("#" + s).includes(s));
   return [...new Set(tags)]
@@ -299,13 +323,14 @@ export function generate(
   const dict = {
     ...values,
     products: details,
+    count: String(values.products.length),
     date: values.date
       ? `${kind === 0 ? "ご案内日" : "対象日"}: ${values.date}`
       : "",
   };
   return template
     .replace(
-      /\{(title|date|products|note|hashtags)\}/g,
+      /\{(title|date|products|note|hashtags|count)\}/g,
       (_, key: keyof typeof dict) => dict[key],
     )
     .replace(/\n{3,}/g, "\n\n")

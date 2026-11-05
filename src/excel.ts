@@ -172,7 +172,7 @@ export async function readExcel(
       const originalName = text(name),
         originalMaker = text(maker),
         scheduledDate = excelDate(date, book.properties.date1904);
-      const key = excelKey(scheduledDate, originalName, originalMaker);
+      const key = excelKey(scheduledDate, originalName, originalMaker, line);
       const p = product({
         name: originalName,
         maker: originalMaker,
@@ -182,6 +182,7 @@ export async function readExcel(
         status: "予定",
         excel: {
           key,
+          rowNumber: line,
           originalName,
           originalMaker,
           scheduledDate,
@@ -189,16 +190,7 @@ export async function readExcel(
           cs: quantity(cs),
         },
       });
-      const previous = found.get(key);
-      if (
-        previous &&
-        (previous.excel!.units !== p.excel!.units ||
-          previous.excel!.cs !== p.excel!.cs)
-      )
-        throw Error(
-          "同じ予定日・品名・メーカーで数量が異なる行があります。元表を確認してください",
-        );
-      if (!previous) found.set(key, p);
+      found.set(key, p);
     } catch (e) {
       throw Error(`${line}行目: ${(e as Error).message}`);
     }
@@ -227,19 +219,28 @@ export function mergeExcel(
   const byKey = new Map(
     existing.filter((p) => p.excel).map((p) => [p.excel!.key, p]),
   );
-  const updates = new Map<string, Product>();
+  const migrated = new Set<string>();
+  const replacements = new Map<string, Product>();
+  const additions: Product[] = [];
   for (const row of incoming) {
     if (!row.excel) throw Error("Excel商品ではありません");
-    const previous = byKey.get(row.excel.key);
-    updates.set(
-      row.excel.key,
-      previous ? { ...previous, excel: { ...row.excel } } : row,
-    );
+    let previous = byKey.get(row.excel.key);
+    if (!previous) {
+      const oldKey = excelKey(
+        row.excel.scheduledDate,
+        row.excel.originalName,
+        row.excel.originalMaker,
+      );
+      const old = byKey.get(oldKey);
+      if (old && !migrated.has(oldKey)) {
+        previous = old;
+        migrated.add(oldKey);
+      }
+    }
+    const updated = previous ? { ...previous, excel: { ...row.excel } } : row;
+    if (previous) replacements.set(previous.id, updated);
+    else additions.push(updated);
+    byKey.set(row.excel.key, updated);
   }
-  const result = existing.map((p) =>
-    p.excel && updates.has(p.excel.key) ? updates.get(p.excel.key)! : p,
-  );
-  const ids = new Set(existing.filter((p) => p.excel).map((p) => p.excel!.key));
-  for (const [key, row] of updates) if (!ids.has(key)) result.push(row);
-  return result;
+  return existing.map((p) => replacements.get(p.id) ?? p).concat(additions);
 }

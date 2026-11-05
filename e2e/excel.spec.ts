@@ -59,7 +59,7 @@ test("Excelの取込・日付抽出・編集・一括追加・再読込重複防
     page.getByLabel("商品状態 元の景品A", { exact: true }),
   ).toHaveValue("入荷済み");
   await page
-    .getByRole("button", { name: "選択商品を投稿作成へ一括追加", exact: true })
+    .getByRole("button", { name: "選択した商品を追加", exact: true })
     .click();
   await expect(page.locator("#preview")).toContainText("投稿用の景品A");
   await expect(page.locator("#preview")).toContainText("元の景品B");
@@ -122,4 +122,98 @@ test("Excelのドロップと読込失敗時の既存データ保護", async ({ 
   await expect(page.locator("#status")).toContainText("Excel読み込み失敗");
   await expect(page.locator("#excelResult")).toHaveText("3件表示 / 0件選択");
   await expect(page.locator("#excelSource")).toContainText("ドロップ.xlsx");
+});
+
+test("チェックした商品だけを追加し、日付変更・再追加・削除・並替えを制御する", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await page.locator("#excelFile").setInputFiles({
+    name: "選択テスト.xlsx",
+    mimeType: "application/octet-stream",
+    buffer: await workbook(),
+  });
+  await expect(page.locator("#excelResult")).toHaveText("3件表示 / 0件選択");
+  await expect(page.locator("#addExcel")).toBeDisabled();
+  await expect(
+    page.locator("#excelRows input[type=checkbox]:checked"),
+  ).toHaveCount(0);
+  await page.locator("#excelDay").fill("2026-11-05");
+  await page.locator("[data-excel-check]").first().check();
+  await expect(page.locator("#excelResult")).toHaveText("2件表示 / 1件選択");
+  await page.locator("#addExcel").click();
+  await expect(page.locator("#addedList [data-added]")).toHaveCount(1);
+  await expect(page.locator("#addedList")).toContainText("元の景品A");
+  await expect(page.locator("#addedList")).not.toContainText("元の景品B");
+  await expect(page.locator("#preview")).not.toContainText("元の景品B");
+  await expect(page.locator("#products [data-product]")).toHaveCount(1);
+  // 追加後も自動では次の商品を選ばない。
+  await expect(page.locator("#addExcel")).toBeDisabled();
+  await page.locator("[data-excel-check]").first().check();
+  await page.locator("#addExcel").click();
+  await expect(page.locator("#addedList [data-added]")).toHaveCount(1);
+  await page.locator("[data-excel-check]").first().check();
+  await page.locator("#excelDay").fill("2026-11-06");
+  await expect(
+    page.locator("#excelRows input[type=checkbox]:checked"),
+  ).toHaveCount(0);
+  await expect(page.locator("#addExcel")).toBeDisabled();
+  await page.locator("[data-excel-check]").first().check();
+  await page.locator("#addExcel").click();
+  await expect(page.locator("#addedList [data-added]")).toHaveCount(2);
+  await page
+    .getByRole("button", { name: "別日の景品を上へ", exact: true })
+    .click();
+  await expect(page.locator("#addedList [data-added]").first()).toContainText(
+    "別日の景品",
+  );
+  const text = await page.locator("#preview").innerText();
+  expect(text.indexOf("別日の景品")).toBeLessThan(text.indexOf("元の景品A"));
+  await page
+    .getByRole("button", { name: "元の景品Aを投稿から削除", exact: true })
+    .click();
+  await expect(page.locator("#addedList [data-added]")).toHaveCount(1);
+  await expect(page.locator("#preview")).not.toContainText("元の景品A");
+  await page.locator("#excelDay").fill("2026-11-05");
+  await page.locator("[data-excel-check]").nth(1).check();
+  await page.locator("#addExcel").click();
+  await expect(page.locator("#addedList [data-added]")).toHaveCount(2);
+  await expect(page.locator("#addedList")).not.toContainText("元の景品A");
+  await expect(page.locator("#addedList")).toContainText("元の景品B");
+  // 絞り込み変更でもチェックを解除し、見えない商品は追加できない。
+  await page.locator("[data-excel-check]").first().check();
+  await page.locator("#excelMakerFilter").fill("メーカーB");
+  await expect(page.locator("#excelResult")).toHaveText("1件表示 / 0件選択");
+  await expect(page.locator("#addExcel")).toBeDisabled();
+  await page.locator("#excelNameFilter").fill("該当しない");
+  await expect(page.locator("#excelResult")).toContainText("0件表示");
+  await expect(page.locator("#addExcel")).toBeDisabled();
+});
+
+test("添付実ファイルの135件から指定日のチェックした1件だけを追加する", async ({
+  page,
+}) => {
+  const path = process.env.EXCEL_FIXTURE_PATH;
+  test.skip(!path, "添付のローカル検証用ファイルはCIへ持ち込まない");
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.goto("/");
+  await page.locator("#excelFile").setInputFiles(path!);
+  await expect(page.locator("#excelResult")).toHaveText("135件表示 / 0件選択");
+  await expect(page.locator("#addExcel")).toBeDisabled();
+  await page.locator("#excelDay").fill("2026-11-05");
+  await expect(page.locator("#excelResult")).toHaveText("8件表示 / 0件選択");
+  const firstName = await page
+    .locator("#excelRows [data-excel-name]")
+    .first()
+    .inputValue();
+  await page.locator("[data-excel-check]").first().check();
+  await page.locator("#addExcel").click();
+  await expect(page.locator("#addedList [data-added]")).toHaveCount(1);
+  await expect(page.locator("#products [data-product]")).toHaveCount(1);
+  await expect(page.locator("#preview")).toContainText(firstName);
+  if (process.env.EXCEL_SCREENSHOT)
+    await page.screenshot({
+      path: process.env.EXCEL_SCREENSHOT,
+      fullPage: true,
+    });
 });

@@ -7,7 +7,9 @@ import {
   mergeExcel,
   readExcel,
 } from "./excel";
+import { checkedProducts } from "./selection";
 interface Context {
+  sidebar?: HTMLElement;
   getState: () => State;
   commit: (state: State) => Promise<void>;
   select: (ids: string[]) => void;
@@ -22,8 +24,9 @@ const esc = (s: string) =>
       ]!,
   );
 export async function mountExcel(host: HTMLElement, ctx: Context) {
-  host.innerHTML = `<details class="excel-panel"><summary>Excel入荷予定表を読み込む</summary><div id="excelDrop" class="drop-zone" tabindex="0" role="group" aria-label="Excelファイルのドロップ領域"><p>.xlsm / .xlsx をここへドロップ</p><button id="chooseExcel">Excelファイルを選択</button><input id="excelFile" type="file" accept=".xlsm,.xlsx" hidden></div><p id="excelSource" class="hint"></p><button id="reloadExcel">元ファイルを再読み込み</button><p class="hint">「縦」シートの保存済み値を読みます。マクロ・数式は実行しません。稼働予定日は稼働の確定日ではありません。</p><fieldset id="excelControls"><legend>稼働予定日で抽出</legend><label>単日カレンダー<input id="excelDay" type="date"></label><button id="findExcelDay">この日の商品を表示</button><div class="row"><label>開始日<input id="excelFrom" type="date"></label><label>終了日<input id="excelTo" type="date"></label></div><button id="findExcelRange">期間で検索</button><button id="showAllExcel">すべての日付を表示</button><div class="row"><button id="selectAllExcel">表示商品を全選択</button><button id="clearExcelSelection">選択を解除</button></div><p id="excelResult" role="status"></p><div id="excelRows"></div><button id="addExcel" class="primary">選択商品を投稿作成へ一括追加</button></fieldset></details>`;
-  const input = host.querySelector<HTMLInputElement>("#excelFile")!;
+  host.innerHTML = `<h2>Excelの商品を選択</h2><div id="excelSidebar"><details class="excel-panel" open><summary>Excel入荷予定表を読み込む</summary><div id="excelDrop" class="drop-zone" tabindex="0" role="group" aria-label="Excelファイルのドロップ領域"><p>.xlsm / .xlsx をドロップ</p><button id="chooseExcel">Excelファイルを選択</button><input id="excelFile" type="file" accept=".xlsm,.xlsx" hidden></div><p id="excelSource" class="hint"></p><button id="reloadExcel">元ファイルを再読み込み</button><p class="hint">VBA・数式は実行しません。稼働予定日は確定日ではありません。</p></details><fieldset id="excelSearch"><legend>日付・商品を検索</legend><label>単日カレンダー<input id="excelDay" type="date"></label><button id="findExcelDay">この日の商品を表示</button><label>開始日<input id="excelFrom" type="date"></label><label>終了日<input id="excelTo" type="date"></label><button id="findExcelRange">期間で検索</button><button id="showAllExcel">すべての日付を表示</button><label>商品名で絞り込み<input id="excelNameFilter" type="search"></label><label>メーカーで絞り込み<input id="excelMakerFilter" type="search"></label></fieldset></div><fieldset id="excelControls"><legend>Excel検索結果</legend><div class="row"><button id="selectAllExcel">表示商品を全選択</button><button id="clearExcelSelection">選択を解除</button></div><p id="excelResult" role="status"></p><div id="excelRows"></div><button id="addExcel" class="primary" disabled>選択した商品を追加</button><p class="hint">チェックした商品だけを投稿へ追加します。検索の変更でチェックを解除します。</p></fieldset>`;
+  if (ctx.sidebar) ctx.sidebar.append(document.querySelector("#excelSidebar")!);
+  const input = document.querySelector<HTMLInputElement>("#excelFile")!;
   const chosen = new Set<string>();
   let shown: Product[] = [];
   let range: { from: string; to: string } | null = null;
@@ -31,29 +34,43 @@ export async function mountExcel(host: HTMLElement, ctx: Context) {
   const all = () => ctx.getState().excelSource?.rows ?? [];
   function source() {
     const s = ctx.getState().excelSource;
-    host.querySelector("#excelSource")!.textContent = s
+    document.querySelector("#excelSource")!.textContent = s
       ? `読込元: ${s.name}${s.path ? "（パスを記憶済み）" : "（ブラウザでは再選択が必要です）"}`
       : "ファイル未選択";
-    host.querySelector<HTMLButtonElement>("#reloadExcel")!.disabled =
+    document.querySelector<HTMLButtonElement>("#reloadExcel")!.disabled =
       !s || busy;
   }
+  function syncAdd() {
+    document.querySelector<HTMLButtonElement>("#addExcel")!.disabled =
+      busy || checkedProducts(shown, chosen).length === 0;
+  }
   function result(message: string) {
-    host.querySelector("#excelResult")!.textContent = message;
+    document.querySelector("#excelResult")!.textContent = message;
+    syncAdd();
   }
   function render() {
-    shown = range ? filterSchedule(all(), range.from, range.to) : all();
+    const normalize = (s: string) => s.normalize("NFKC").toLocaleLowerCase();
+    const name = normalize(val("excelNameFilter")),
+      maker = normalize(val("excelMakerFilter"));
+    shown = (range ? filterSchedule(all(), range.from, range.to) : all())
+      .filter(
+        (p) =>
+          normalize(p.name + " " + p.excel!.originalName).includes(name) &&
+          normalize(p.maker).includes(maker),
+      )
+      .sort((a, b) => (a.excel!.rowNumber ?? 0) - (b.excel!.rowNumber ?? 0));
     const visibleKeys = new Set(shown.map((p) => p.excel!.key));
     for (const key of chosen) if (!visibleKeys.has(key)) chosen.delete(key);
     result(
       shown.length
         ? `${shown.length}件表示 / ${chosen.size}件選択`
-        : "該当する稼働予定日の対象商品がありません",
+        : "0件表示 / 0件選択 · 該当する稼働予定日の対象商品がありません",
     );
-    const rows = host.querySelector("#excelRows")!;
+    const rows = document.querySelector("#excelRows")!;
     rows.innerHTML = shown
       .map(
         (p) =>
-          `<article class="item"><label><input type="checkbox" data-excel-check="${esc(p.excel!.key)}" ${chosen.has(p.excel!.key) ? "checked" : ""}>${esc(p.excel!.originalName)}</label><small>稼働予定 ${esc(p.excel!.scheduledDate)}（未確定） / ${esc(p.maker)} / 入数 ${p.excel!.units ?? "未入力"} / CS数 ${p.excel!.cs ?? "未入力"}</small><label>投稿用商品名<input data-excel-name="${esc(p.excel!.key)}" value="${esc(p.name)}" maxlength="200" aria-label="投稿用商品名 ${esc(p.excel!.originalName)}"></label><label>商品状態<select data-excel-status="${esc(p.excel!.key)}" aria-label="商品状態 ${esc(p.excel!.originalName)}">${productStatuses.map((s) => `<option ${s === p.status ? "selected" : ""}>${s}</option>`).join("")}</select></label></article>`,
+          `<article class="item"><label><input type="checkbox" data-excel-check="${esc(p.excel!.key)}" ${chosen.has(p.excel!.key) ? "checked" : ""}>${esc(p.excel!.originalName)}</label><small>元Excel ${p.excel!.rowNumber ?? "不明"}行目 / 稼働予定 ${esc(p.excel!.scheduledDate)}（未確定） / ${esc(p.maker)} / 入数 ${p.excel!.units ?? "未入力"} / CS数 ${p.excel!.cs ?? "未入力"}</small><label>投稿用商品名<input data-excel-name="${esc(p.excel!.key)}" value="${esc(p.name)}" maxlength="200" aria-label="投稿用商品名 ${esc(p.excel!.originalName)}"></label><label>商品状態<select data-excel-status="${esc(p.excel!.key)}" aria-label="商品状態 ${esc(p.excel!.originalName)}">${productStatuses.map((s) => `<option ${s === p.status ? "selected" : ""}>${s}</option>`).join("")}</select></label></article>`,
       )
       .join("");
     rows.querySelectorAll<HTMLInputElement>("[data-excel-check]").forEach(
@@ -113,9 +130,15 @@ export async function mountExcel(host: HTMLElement, ctx: Context) {
   function setBusy(value: boolean) {
     busy = value;
     host
-      .querySelectorAll<HTMLButtonElement>("button")
+      .querySelectorAll<HTMLButtonElement>(
+        "#excelSidebar button, #excelControls button",
+      )
       .forEach((b) => (b.disabled = value));
-    host.querySelector<HTMLFieldSetElement>("#excelControls")!.disabled = value;
+    document.querySelector<HTMLFieldSetElement>("#excelControls")!.disabled =
+      value;
+    document.querySelector<HTMLFieldSetElement>("#excelSearch")!.disabled =
+      value;
+    syncAdd();
     source();
   }
   async function apply(bytes: Uint8Array, name: string, path: string | null) {
@@ -127,7 +150,10 @@ export async function mountExcel(host: HTMLElement, ctx: Context) {
     );
     const merged = mergeExcel(previous, incoming),
       keys = new Set(incoming.map((p) => p.excel!.key));
-    const rows = merged.filter((p) => p.excel && keys.has(p.excel.key));
+    const byKey = new Map(
+      merged.filter((p) => p.excel).map((p) => [p.excel!.key, p]),
+    );
+    const rows = incoming.map((p) => byKey.get(p.excel!.key)!);
     // 既存マスターのみ数量を更新。新商品は一括追加ボタンまでマスターへ追加しない。
     const incomingByKey = new Map(
       incoming.map((p) => [p.excel!.key, p.excel!]),
@@ -142,6 +168,14 @@ export async function mountExcel(host: HTMLElement, ctx: Context) {
     );
     await ctx.commit({ ...state, products, excelSource: { name, path, rows } });
     chosen.clear();
+    for (const id of [
+      "excelDay",
+      "excelFrom",
+      "excelTo",
+      "excelNameFilter",
+      "excelMakerFilter",
+    ])
+      (document.getElementById(id) as HTMLInputElement).value = "";
     range = null;
     render();
     ctx.notify(
@@ -173,7 +207,7 @@ export async function mountExcel(host: HTMLElement, ctx: Context) {
       await apply(new Uint8Array(await file.arrayBuffer()), file.name, null);
     });
   }
-  host.querySelector<HTMLButtonElement>("#chooseExcel")!.onclick = () => {
+  document.querySelector<HTMLButtonElement>("#chooseExcel")!.onclick = () => {
     if (isTauri())
       void run(async () => {
         const { open } = await import("@tauri-apps/plugin-dialog");
@@ -190,7 +224,7 @@ export async function mountExcel(host: HTMLElement, ctx: Context) {
     if (input.files?.[0]) await file(input.files[0]);
     input.value = "";
   };
-  host.querySelector<HTMLButtonElement>("#reloadExcel")!.onclick = () => {
+  document.querySelector<HTMLButtonElement>("#reloadExcel")!.onclick = () => {
     const path = ctx.getState().excelSource?.path;
     if (isTauri() && path) void run(() => readPath(path));
     else {
@@ -200,7 +234,7 @@ export async function mountExcel(host: HTMLElement, ctx: Context) {
       input.click();
     }
   };
-  const drop = host.querySelector<HTMLElement>("#excelDrop")!;
+  const drop = document.querySelector<HTMLElement>("#excelDrop")!;
   drop.ondragover = (e) => {
     e.preventDefault();
     drop.classList.add("dragging");
@@ -221,7 +255,9 @@ export async function mountExcel(host: HTMLElement, ctx: Context) {
       const { getCurrentWebview } = await import("@tauri-apps/api/webview");
       const unlisten = await getCurrentWebview().onDragDropEvent((event) => {
         if (event.payload.type !== "drop") return;
-        host.querySelector<HTMLDetailsElement>("details")!.open = true;
+        document.querySelector<HTMLDetailsElement>(
+          "#excelSidebar details",
+        )!.open = true;
         if (event.payload.paths.length !== 1) {
           ctx.notify("Excelファイルを1つだけドロップしてください");
           return;
@@ -237,8 +273,9 @@ export async function mountExcel(host: HTMLElement, ctx: Context) {
     }
   }
   const val = (id: string) =>
-    host.querySelector<HTMLInputElement>("#" + id)!.value;
+    document.querySelector<HTMLInputElement>("#" + id)!.value;
   function search(from: string, to = from) {
+    chosen.clear();
     try {
       const found = filterSchedule(all(), from, to);
       range = { from, to };
@@ -246,53 +283,66 @@ export async function mountExcel(host: HTMLElement, ctx: Context) {
       render();
       if (!found.length) ctx.notify("該当する稼働予定日の対象商品がありません");
     } catch (e) {
+      render();
       ctx.notify((e as Error).message);
     }
   }
-  host.querySelector<HTMLButtonElement>("#findExcelDay")!.onclick = () =>
+  document.querySelector<HTMLButtonElement>("#findExcelDay")!.onclick = () =>
     search(val("excelDay"));
-  host.querySelector<HTMLInputElement>("#excelDay")!.onchange = () =>
+  document.querySelector<HTMLInputElement>("#excelDay")!.onchange = () =>
     search(val("excelDay"));
-  host.querySelector<HTMLButtonElement>("#findExcelRange")!.onclick = () =>
+  document.querySelector<HTMLButtonElement>("#findExcelRange")!.onclick = () =>
     search(val("excelFrom"), val("excelTo"));
-  host.querySelector<HTMLButtonElement>("#showAllExcel")!.onclick = () => {
+  document.querySelector<HTMLButtonElement>("#showAllExcel")!.onclick = () => {
     range = null;
     chosen.clear();
     render();
   };
-  host.querySelector<HTMLButtonElement>("#selectAllExcel")!.onclick = () => {
-    shown.forEach((p) => chosen.add(p.excel!.key));
-    render();
-  };
-  host.querySelector<HTMLButtonElement>("#clearExcelSelection")!.onclick =
+  document.querySelector<HTMLButtonElement>("#selectAllExcel")!.onclick =
+    () => {
+      shown.forEach((p) => chosen.add(p.excel!.key));
+      render();
+    };
+  document.querySelector<HTMLButtonElement>("#clearExcelSelection")!.onclick =
     () => {
       chosen.clear();
       render();
     };
-  host.querySelector<HTMLButtonElement>("#addExcel")!.onclick = async () => {
-    if (busy) return;
-    setBusy(true);
-    try {
-      const rows = shown.filter((p) => chosen.has(p.excel!.key));
-      if (!rows.length) throw Error("投稿に追加する商品を選択してください");
-      const state = ctx.getState(),
-        products = mergeExcel(state.products, rows);
-      await ctx.commit({ ...state, products });
-      const keys = new Set(rows.map((p) => p.excel!.key));
-      ctx.select(
-        products
-          .filter((p) => p.excel && keys.has(p.excel.key))
-          .map((p) => p.id),
-      );
-      ctx.notify(
-        `${rows.length}件を投稿作成画面に追加しました。状態と文章を確認してください`,
-      );
-    } catch (e) {
-      ctx.notify((e as Error).message);
-    } finally {
-      setBusy(false);
-    }
-  };
+  document.querySelector<HTMLButtonElement>("#addExcel")!.onclick =
+    async () => {
+      if (busy) return;
+      setBusy(true);
+      try {
+        const rows = checkedProducts(shown, chosen);
+        if (!rows.length) throw Error("投稿に追加する商品を選択してください");
+        const state = ctx.getState(),
+          products = mergeExcel(state.products, rows);
+        await ctx.commit({ ...state, products });
+        const byKey = new Map(
+          products.filter((p) => p.excel).map((p) => [p.excel!.key, p.id]),
+        );
+        ctx.select(rows.map((p) => byKey.get(p.excel!.key)!));
+        chosen.clear();
+        render();
+        ctx.notify(
+          `${rows.length}件を投稿作成画面に追加しました。状態と文章を確認してください`,
+        );
+      } catch (e) {
+        ctx.notify((e as Error).message);
+      } finally {
+        setBusy(false);
+      }
+    };
+  for (const id of ["excelFrom", "excelTo"])
+    document.getElementById(id)!.addEventListener("change", () => {
+      chosen.clear();
+      render();
+    });
+  for (const id of ["excelNameFilter", "excelMakerFilter"])
+    document.getElementById(id)!.addEventListener("input", () => {
+      chosen.clear();
+      render();
+    });
   document.addEventListener("products-changed", () => {
     if (!busy) render();
   });

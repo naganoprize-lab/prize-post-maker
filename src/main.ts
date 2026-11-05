@@ -6,7 +6,7 @@ export const kinds = [
   "入荷遅延",
 ] as const;
 const app = document.querySelector<HTMLDivElement>("#app")!;
-app.innerHTML = `<header><div><strong>プライズポストメーカー</strong><small>店舗の情報を、わかりやすく。</small></div><button id="theme">表示テーマ切替</button></header><main><nav aria-label="投稿種類"><h2>投稿をつくる</h2>${kinds.map((k, i) => `<button data-kind="${i}" class="${i === 0 ? "active" : ""}">${k}</button>`).join("")}<p>投稿は必ず担当者が確認してください。</p></nav><section id="editor"><h1 id="heading">月間入荷予定</h1><div id="workspace"><p>商品を登録して投稿を作成します。</p></div></section><aside><h2>X 投稿プレビュー</h2><div class="post"><strong>あなたのお店</strong><small>@your_store · プレビュー</small><p id="preview">ここに投稿文章が表示されます。</p><div id="imagePreview"></div></div><p id="counter">0 / 280</p><div id="actions"></div></aside></main><div id="status" role="status" aria-live="polite"></div>`;
+app.innerHTML = `<header><div><strong>プライズポストメーカー</strong><small>店舗の情報を、わかりやすく。</small></div><button id="theme">表示テーマ切替</button></header><main><nav aria-label="投稿種類"><h2>投稿をつくる</h2>${kinds.map((k, i) => `<button data-kind="${i}" class="${i === 0 ? "active" : ""}">${k}</button>`).join("")}<p>投稿は必ず担当者が確認してください。</p><div id="excelSearchHost"></div></nav><section id="editor"><h1 id="heading">月間入荷予定</h1><div id="workspace"><p>商品を登録して投稿を作成します。</p></div></section><aside><div id="addedProducts"></div><div id="postEditor"></div><h2>X 投稿プレビュー</h2><div class="post"><strong>あなたのお店</strong><small>@your_store · プレビュー</small><p id="preview">ここに投稿文章が表示されます。</p><div id="imagePreview"></div></div><p id="counter">0 / 280</p><div id="actions"></div></aside></main><div id="status" role="status" aria-live="polite"></div>`;
 document.querySelectorAll<HTMLButtonElement>("[data-kind]").forEach(
   (button) =>
     (button.onclick = () => {
@@ -44,20 +44,23 @@ const status = (text: string) => {
   document.querySelector("#status")!.textContent = text;
 };
 async function persist() {
+  const next = { ...state };
   if (state.excelSource) {
     const byKey = new Map(
       state.products.filter((p) => p.excel).map((p) => [p.excel!.key, p]),
     );
-    state.excelSource = {
+    next.excelSource = {
       ...state.excelSource,
       rows: state.excelSource.rows.map((p) => byKey.get(p.excel!.key) ?? p),
     };
   }
-  await save(state);
+  await save(next);
+  state.excelSource = next.excelSource;
 }
+
 function master() {
   document.querySelector("#workspace")!.innerHTML =
-    `<div id="excelHost"></div><div id="composer"></div><details><summary>商品マスター（登録・編集・CSV）</summary><form id="productForm">${fields.map((f, i) => `<label>${labels[i]}${i === 0 ? "（必須）" : ""}<input name="${f}" ${f === "arrivalDate" ? 'type="date"' : 'maxlength="200"'} ${i === 0 ? "required" : ""}></label>`).join("")}<input type="hidden" name="id"><button class="primary">商品を保存</button><button type="button" id="resetProduct">新規入力</button></form><div id="masterList"></div><label>CSVインポート<input id="csv" type="file" accept=".csv,text/csv"></label><button id="export">CSVエクスポート</button></details>`;
+    `<div id="excelHost"></div><div id="composer"></div><details><summary>商品マスター（登録・編集・CSV）</summary><form id="productForm">${fields.map((f, i) => `<label>${labels[i]}${i === 0 ? "（必須）" : ""}<input name="${f}" ${f === "arrivalDate" ? 'type="date"' : 'maxlength="200"'} ${i === 0 ? "required" : ""}></label>`).join("")}<label>登録ハッシュタグ（空白区切り）<input name="tags" maxlength="200"></label><input type="hidden" name="id"><button class="primary">商品を保存</button><button type="button" id="resetProduct">新規入力</button></form><div id="masterList"></div><label>CSVインポート<input id="csv" type="file" accept=".csv,text/csv"></label><button id="export">CSVエクスポート</button></details>`;
   renderMaster();
   document.querySelector<HTMLFormElement>("#productForm")!.onsubmit = async (
     e,
@@ -67,7 +70,14 @@ function master() {
       const form = e.currentTarget as HTMLFormElement;
       const values = Object.fromEntries(new FormData(form));
       const existing = state.products.find((p) => p.id === values.id);
-      const p = product({ ...existing, ...values });
+      const p = product({
+        ...existing,
+        ...values,
+        hashtags: String(values.tags ?? "")
+          .split(/\s+/)
+          .map((t) => t.replace(/^#/, ""))
+          .filter(Boolean),
+      });
       const previous = state.products;
       state.products = state.products.filter((v) => v.id !== p.id).concat(p);
       try {
@@ -136,6 +146,9 @@ function renderMaster() {
       (b.onclick = () => {
         const p = state.products.find((p) => p.id === b.dataset.edit)!;
         const f = document.querySelector<HTMLFormElement>("#productForm")!;
+        (f.elements.namedItem("tags") as HTMLInputElement).value = (
+          p.hashtags ?? []
+        ).join(" ");
         for (const key of [...fields, "id"] as const)
           (f.elements.namedItem(key) as HTMLInputElement).value = p[key];
       }),
@@ -174,10 +187,16 @@ export const ready = load()
 import { titles, hashtags, generate, countText } from "./domain";
 let kind = 0;
 const selected = new Set<string>();
+function orderedSelected() {
+  const byId = new Map(state.products.map((p) => [p.id, p]));
+  return [...selected]
+    .map((id) => byId.get(id))
+    .filter((p): p is import("./domain").Product => Boolean(p));
+}
 let dirty = false;
 function composer() {
   document.querySelector("#composer")!.innerHTML =
-    `<div class="card"><h2>1. 商品を選択</h2><label>商品を検索<input id="search" placeholder="商品名・作品・キャラクター・メーカー"></label><label>月間予定の対象月（任意）<input id="month" type="month"></label><div class="row"><button id="selectVisible">表示商品をすべて選択</button><button id="clearSelected">選択解除</button></div><p id="selectionCount" class="hint"></p><div id="products"></div></div><div class="card"><h2>2. 投稿を設定</h2><label>タイトル候補<select id="titles"></select></label><label>タイトル<input id="title" maxlength="200"></label><label>対象日／ご案内日（任意）<input id="date" type="date"></label><label id="operationLabel">当日の状態<select id="operation"><option>入荷</option><option>稼働中</option><option>入荷・稼働中</option></select></label><label>備考（確認済みの情報のみ）<textarea id="note" maxlength="2000" placeholder="遅延後の日程が未定の場合は「変更後の日程は未定です」など、確認できた事実を入力"></textarea></label><label>テンプレート<select id="templates"></select></label><label>テンプレート本文<textarea id="templateBody" maxlength="10000"></textarea></label><p class="hint">利用できる変数: {title} {date} {products} {note} {hashtags}</p><div class="row"><input id="templateName" maxlength="100" placeholder="テンプレート名" aria-label="テンプレート名"><button id="saveTemplate">新規保存</button><button id="updateTemplate">上書き保存</button><button id="deleteTemplate">削除</button></div><label>ハッシュタグ（編集可能）<textarea id="tags" maxlength="2000"></textarea></label><button id="autoTags">選択商品のタグを再生成</button></div><div class="card"><h2>3. 最終文章を確認</h2><label>投稿文章（直接編集できます）<textarea id="text" maxlength="10000" rows="9"></textarea></label><p class="hint">設定変更で生成文に戻ります。手動編集済みの場合は確認します。</p><button id="regenerate">設定から文章を再生成</button></div><details><summary>作成履歴（投稿済みを意味しません・直近200件）</summary><div id="history"></div></details>`;
+    `<div class="card" id="manualProducts"><h2>登録商品から選択</h2><label>商品を検索<input id="search" placeholder="商品名・作品・キャラクター・メーカー"></label><label>月間予定の対象月（任意）<input id="month" type="month"></label><div class="row"><button id="selectVisible">表示商品をすべて選択</button><button id="clearSelected">選択解除</button></div><p id="selectionCount" class="hint"></p><div id="products"></div></div><div class="card" id="postSettings"><h2>投稿を設定</h2><label>タイトル候補<select id="titles"></select></label><label>タイトル<input id="title" maxlength="200"></label><label>対象日／ご案内日（任意）<input id="date" type="date"></label><label id="operationLabel">当日の状態<select id="operation"><option>入荷</option><option>稼働中</option><option>入荷・稼働中</option></select></label><label>備考（確認済みの情報のみ）<textarea id="note" maxlength="2000" placeholder="遅延後の日程が未定の場合は「変更後の日程は未定です」など、確認できた事実を入力"></textarea></label><label>テンプレート<select id="templates"></select></label><label>テンプレート本文<textarea id="templateBody" maxlength="10000"></textarea></label><p class="hint">利用できる変数: {title} {date} {products} {note} {hashtags} {count}</p><div class="row"><input id="templateName" maxlength="100" placeholder="テンプレート名" aria-label="テンプレート名"><button id="saveTemplate">新規保存</button><button id="updateTemplate">上書き保存</button><button id="deleteTemplate">削除</button></div><label>ハッシュタグ（編集可能）<textarea id="tags" maxlength="2000"></textarea></label><button id="autoTags">選択商品のタグを再生成</button></div><div class="card" id="postText"><h2>最終文章を確認</h2><label>投稿文章（直接編集できます）<textarea id="text" maxlength="10000" rows="9"></textarea></label><p class="hint">設定変更で生成文に戻ります。手動編集済みの場合は確認します。</p><button id="regenerate">設定から文章を再生成</button></div><details><summary>作成履歴（投稿済みを意味しません・直近200件）</summary><div id="history"></div></details>`;
   const value = (id: string) =>
     (document.getElementById(id) as HTMLInputElement).value;
   function regenerate(force = false) {
@@ -195,7 +214,7 @@ function composer() {
         {
           title: value("title"),
           date: value("date"),
-          products: state.products.filter((p) => selected.has(p.id)),
+          products: orderedSelected(),
           note: value("note"),
           hashtags: value("tags"),
         },
@@ -206,7 +225,35 @@ function composer() {
       if (selected.size) status((e as Error).message);
       (document.querySelector("#text") as HTMLTextAreaElement).value = "";
     }
+    renderAdded();
     updatePreview();
+  }
+  function renderAdded() {
+    const products = orderedSelected();
+    document.querySelector("#addedProducts")!.innerHTML =
+      `<h2>投稿に追加済みの商品（${products.length}件）</h2><p class="hint">ここにある商品だけで投稿を作成します。</p><div id="addedList">${products.map((p, i) => `<article class="item" data-added="${escape(p.id)}"><strong>${escape(p.name)}</strong><small>${escape(p.excel ? `元品名: ${p.excel.originalName} / ${p.excel.rowNumber ?? "不明"}行目 / ${p.excel.scheduledDate}（予定） / 入数 ${p.excel.units ?? "未入力"} / CS数 ${p.excel.cs ?? "未入力"}` : p.maker)}</small><div class="row"><button data-move="${escape(p.id)}" data-direction="-1" ${i === 0 ? "disabled" : ""} aria-label="${escape(p.name)}を上へ">上へ</button><button data-move="${escape(p.id)}" data-direction="1" ${i === products.length - 1 ? "disabled" : ""} aria-label="${escape(p.name)}を下へ">下へ</button><button data-remove-added="${escape(p.id)}" aria-label="${escape(p.name)}を投稿から削除">投稿から削除</button></div></article>`).join("") || '<p class="hint">中央で商品にチェックを入れて追加してください。</p>'}</div>`;
+    document.querySelectorAll<HTMLButtonElement>("[data-remove-added]").forEach(
+      (b) =>
+        (b.onclick = () => {
+          selected.delete(b.dataset.removeAdded!);
+          showProducts();
+          refreshTags();
+        }),
+    );
+    document.querySelectorAll<HTMLButtonElement>("[data-move]").forEach(
+      (b) =>
+        (b.onclick = () => {
+          const ids = moveProduct(
+            [...selected],
+            b.dataset.move!,
+            Number(b.dataset.direction) as -1 | 1,
+          );
+          selected.clear();
+          ids.forEach((id) => selected.add(id));
+          showProducts();
+          refreshTags();
+        }),
+    );
   }
   function populateTemplates() {
     (document.querySelector("#templates") as HTMLSelectElement).innerHTML =
@@ -263,9 +310,8 @@ function composer() {
       };
   }
   function refreshTags() {
-    (document.querySelector("#tags") as HTMLTextAreaElement).value = hashtags(
-      state.products.filter((p) => selected.has(p.id)),
-    );
+    (document.querySelector("#tags") as HTMLTextAreaElement).value =
+      hashtags(orderedSelected());
     regenerate();
   }
   function setKind() {
@@ -375,8 +421,12 @@ function composer() {
   });
   document.addEventListener("excel-products-selected", (event) => {
     const ids = (event as CustomEvent<string[]>).detail;
+    const next = appendUnique(
+      [...selected],
+      ids.filter((id) => state.products.some((p) => p.id === id)),
+    );
     selected.clear();
-    ids.forEach((id) => selected.add(id));
+    next.forEach((id) => selected.add(id));
     (document.querySelector("#search") as HTMLInputElement).value = "";
     (document.querySelector("#month") as HTMLInputElement).value = "";
     showProducts();
@@ -439,6 +489,11 @@ function updatePreview() {
 }
 function startup() {
   composer();
+  const postEditor = document.querySelector("#postEditor")!;
+  postEditor.append(
+    document.querySelector("#postSettings")!,
+    document.querySelector("#postText")!,
+  );
   document.documentElement.dataset.theme = state.theme;
   document.querySelector<HTMLButtonElement>("#theme")!.onclick = async () => {
     const previous = state.theme;
@@ -600,6 +655,7 @@ document.addEventListener(
   "app-ready",
   () => {
     void mountExcel(document.querySelector<HTMLElement>("#excelHost")!, {
+      sidebar: document.querySelector<HTMLElement>("#excelSearchHost")!,
       getState: () => state,
       commit: async (next) => {
         await save(next);
@@ -616,3 +672,5 @@ document.addEventListener(
   },
   { once: true },
 );
+
+import { moveProduct, appendUnique } from "./selection";

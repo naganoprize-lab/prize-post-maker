@@ -182,25 +182,31 @@ test("再読込は重複を防ぎ投稿名・状態・IDを保持し数量を更
   };
   expect(validateState(JSON.parse(JSON.stringify(s)))).toEqual(s);
 });
-test("同じ行はまとめ、数量の異なる同一キーは黙って統合しない", async () => {
+test("同名同日の別行は区別し元行番号を保持する", async () => {
+  const rows = await readExcel(
+    await fixture([
+      ["2026-11-05", "A", 1, 1, ""],
+      ["2026-11-05", "A", 2, 1, ""],
+      ["2026-11-06", "A", 1, 1, ""],
+    ]),
+    "a.xlsx",
+  );
+  expect(rows).toHaveLength(3);
+  expect(rows.map((p) => p.excel!.rowNumber)).toEqual([2, 3, 4]);
+  expect(new Set(rows.map((p) => p.excel!.key)).size).toBe(3);
   expect(
-    await readExcel(
-      await fixture([
-        ["2026-11-05", "A", 1, 1, ""],
-        ["2026-11-05", "A", 1, 1, ""],
-      ]),
-      "a.xlsx",
+    mergeExcel(
+      rows,
+      await readExcel(
+        await fixture([
+          ["2026-11-05", "A", 1, 1, ""],
+          ["2026-11-05", "A", 2, 1, ""],
+          ["2026-11-06", "A", 1, 1, ""],
+        ]),
+        "a.xlsx",
+      ),
     ),
-  ).toHaveLength(1);
-  await expect(
-    readExcel(
-      await fixture([
-        ["2026-11-05", "A", 1, 1, ""],
-        ["2026-11-05", "A", 2, 1, ""],
-      ]),
-      "a.xlsx",
-    ),
-  ).rejects.toThrow("数量が異なる");
+  ).toHaveLength(3);
 });
 test("シート欠落・ヘッダー欠落・重複・空表は日本語エラー", async () => {
   await expect(
@@ -240,4 +246,28 @@ test("破損・対象外拡張子・巨大ZIPを拒否する", async () => {
       break;
     }
   expect(() => checkArchive(data)).toThrow("展開サイズ");
+});
+test("行番号なしの旧データは1行だけ移行し編集情報を保護する", async () => {
+  const rows = await readExcel(
+    await fixture([
+      ["2026-11-05", "A", 1, 1, ""],
+      ["2026-11-05", "A", 1, 1, ""],
+    ]),
+    "a.xlsx",
+  );
+  const legacy = {
+    ...rows[0],
+    name: "編集済み",
+    excel: {
+      ...rows[0].excel!,
+      rowNumber: undefined,
+      key: JSON.stringify(["2026-11-05", "A", ""]),
+    },
+  };
+  const merged = mergeExcel([legacy], rows);
+  expect(merged).toHaveLength(2);
+  expect(merged[0].id).toBe(legacy.id);
+  expect(merged[0].name).toBe("編集済み");
+  expect(merged[1].name).toBe("A");
+  expect(merged[0].excel!.rowNumber).toBe(2);
 });
