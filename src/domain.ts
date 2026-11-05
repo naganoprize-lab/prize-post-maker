@@ -1,4 +1,25 @@
 import Papa from "papaparse";
+export const productStatuses = [
+  "予定",
+  "入荷済み",
+  "稼働中",
+  "完売",
+  "遅延",
+] as const;
+export type ProductStatus = (typeof productStatuses)[number];
+export interface ExcelMetadata {
+  key: string;
+  originalName: string;
+  originalMaker: string;
+  scheduledDate: string;
+  units: number | null;
+  cs: number | null;
+}
+export interface ExcelSource {
+  name: string;
+  path: string | null;
+  rows: Product[];
+}
 export interface Product {
   id: string;
   name: string;
@@ -6,6 +27,8 @@ export interface Product {
   character: string;
   maker: string;
   arrivalDate: string;
+  status?: ProductStatus;
+  excel?: ExcelMetadata;
 }
 export interface Template {
   id: string;
@@ -24,6 +47,7 @@ export interface State {
   templates: Template[];
   history: History[];
   theme: "light" | "dark" | "system";
+  excelSource?: ExcelSource;
 }
 export const fields = [
   "name",
@@ -61,10 +85,45 @@ export function product(input: unknown): Product {
   if (!(p.name as string).trim()) throw Error("商品名を入力してください");
   if (p.arrivalDate && !validDate(p.arrivalDate as string))
     throw Error("入荷日は実在する YYYY-MM-DD で入力してください");
+  if (
+    p.status !== undefined &&
+    !productStatuses.includes(p.status as ProductStatus)
+  )
+    throw Error("商品状態が不正です");
+  let excel: ExcelMetadata | undefined;
+  if (p.excel !== undefined) {
+    const e = p.excel as ExcelMetadata;
+    if (
+      !e ||
+      typeof e.originalName !== "string" ||
+      !e.originalName.trim() ||
+      e.originalName.length > 200 ||
+      typeof e.originalMaker !== "string" ||
+      e.originalMaker.length > 200 ||
+      !validDate(e.scheduledDate) ||
+      e.key !== excelKey(e.scheduledDate, e.originalName, e.originalMaker) ||
+      [e.units, e.cs].some(
+        (n) =>
+          n !== null &&
+          (typeof n !== "number" || !Number.isSafeInteger(n) || n < 0),
+      )
+    )
+      throw Error("Excel商品情報が不正です");
+    excel = { ...e };
+  }
   return {
+    ...(p.status !== undefined ? { status: p.status } : {}),
+    ...(excel ? { excel } : {}),
     id: typeof p.id === "string" && p.id ? p.id : crypto.randomUUID(),
     ...Object.fromEntries(fields.map((f) => [f, (p[f] as string).trim()])),
   } as Product;
+}
+export function excelKey(date: string, name: string, maker: string): string {
+  return JSON.stringify([
+    date,
+    name.normalize("NFKC").trim(),
+    maker.normalize("NFKC").trim(),
+  ]);
 }
 export function importCSV(text: string): Product[] {
   const result = Papa.parse<Record<string, string>>(
@@ -148,7 +207,27 @@ export function validateState(input: unknown): State {
       isNaN(Date.parse(h.createdAt))
     )
       throw Error("履歴が不正です");
-  return { ...s, products };
+  let excelSource: ExcelSource | undefined;
+  if (s.excelSource !== undefined) {
+    const e = s.excelSource;
+    if (
+      !e ||
+      typeof e.name !== "string" ||
+      !/\.(xlsx|xlsm)$/i.test(e.name) ||
+      (e.path !== null && typeof e.path !== "string") ||
+      !Array.isArray(e.rows) ||
+      e.rows.length > 10000
+    )
+      throw Error("Excel読込元が不正です");
+    const rows = e.rows.map(product);
+    if (
+      rows.some((p) => !p.excel) ||
+      new Set(rows.map((p) => p.excel!.key)).size !== rows.length
+    )
+      throw Error("Excel読込商品が不正です");
+    excelSource = { name: e.name, path: e.path, rows };
+  }
+  return { ...s, products, ...(excelSource ? { excelSource } : {}) };
 }
 
 import twitter from "twitter-text";
@@ -197,8 +276,15 @@ export function generate(
   const details = values.products
     .map((p) => {
       const info = [p.work, p.character, p.maker].filter(Boolean).join(" / ");
-      const suffix =
-        kind === 0
+      if (
+        p.excel &&
+        ((kind === 2 && p.status !== "完売") ||
+          (kind === 3 && p.status !== "遅延"))
+      )
+        throw Error(`${p.name}: 投稿種類に合う商品状態に変更してください`);
+      const suffix = p.excel
+        ? `稼働予定 ${p.excel.scheduledDate}（予定日・稼働確定日ではありません） / ${p.status ?? "予定"}`
+        : kind === 0
           ? p.arrivalDate
             ? `入荷予定 ${p.arrivalDate}`
             : "入荷日未確認"

@@ -236,3 +236,33 @@ summary {
     padding: 16px;
   }
 }
+.drop-zone {
+  border: 2px dashed var(--line);
+  border-radius: 8px;
+  padding: 14px;
+  text-align: center;
+  margin: 12px 0;
+}
+.drop-zone.dragging {
+  border-color: var(--accent);
+  background: var(--panel);
+}
+fieldset {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  margin: 12px 0;
+  min-width: 0;
+}
+.excel-panel[open] {
+  border-color: var(--accent);
+}
+#excelRows {
+  max-height: 580px;
+  overflow-y: auto;
+}
+#excelRows .item {
+  padding: 14px 2px;
+}
+#excelRows input[type="checkbox"] {
+  accent-color: var(--accent);
+}

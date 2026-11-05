@@ -7,7 +7,12 @@
     "core:default",
     {
       "identifier": "opener:allow-open-url",
-      "allow": [{ "url": "https://x.com/intent/post?*" }]
-    }
+      "allow": [
+        {
+          "url": "https://x.com/intent/post?*"
+        }
+      ]
+    },
+    "dialog:allow-open"
   ]
 }

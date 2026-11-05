@@ -44,11 +44,20 @@ const status = (text: string) => {
   document.querySelector("#status")!.textContent = text;
 };
 async function persist() {
+  if (state.excelSource) {
+    const byKey = new Map(
+      state.products.filter((p) => p.excel).map((p) => [p.excel!.key, p]),
+    );
+    state.excelSource = {
+      ...state.excelSource,
+      rows: state.excelSource.rows.map((p) => byKey.get(p.excel!.key) ?? p),
+    };
+  }
   await save(state);
 }
 function master() {
   document.querySelector("#workspace")!.innerHTML =
-    `<div id="composer"></div><details><summary>商品マスター（登録・編集・CSV）</summary><form id="productForm">${fields.map((f, i) => `<label>${labels[i]}${i === 0 ? "（必須）" : ""}<input name="${f}" ${f === "arrivalDate" ? 'type="date"' : 'maxlength="200"'} ${i === 0 ? "required" : ""}></label>`).join("")}<input type="hidden" name="id"><button class="primary">商品を保存</button><button type="button" id="resetProduct">新規入力</button></form><div id="masterList"></div><label>CSVインポート<input id="csv" type="file" accept=".csv,text/csv"></label><button id="export">CSVエクスポート</button></details>`;
+    `<div id="excelHost"></div><div id="composer"></div><details><summary>商品マスター（登録・編集・CSV）</summary><form id="productForm">${fields.map((f, i) => `<label>${labels[i]}${i === 0 ? "（必須）" : ""}<input name="${f}" ${f === "arrivalDate" ? 'type="date"' : 'maxlength="200"'} ${i === 0 ? "required" : ""}></label>`).join("")}<input type="hidden" name="id"><button class="primary">商品を保存</button><button type="button" id="resetProduct">新規入力</button></form><div id="masterList"></div><label>CSVインポート<input id="csv" type="file" accept=".csv,text/csv"></label><button id="export">CSVエクスポート</button></details>`;
   renderMaster();
   document.querySelector<HTMLFormElement>("#productForm")!.onsubmit = async (
     e,
@@ -56,7 +65,9 @@ function master() {
     e.preventDefault();
     try {
       const form = e.currentTarget as HTMLFormElement;
-      const p = product(Object.fromEntries(new FormData(form)));
+      const values = Object.fromEntries(new FormData(form));
+      const existing = state.products.find((p) => p.id === values.id);
+      const p = product({ ...existing, ...values });
       const previous = state.products;
       state.products = state.products.filter((v) => v.id !== p.id).concat(p);
       try {
@@ -176,6 +187,7 @@ function composer() {
       !confirm("手動編集した文章を設定から再生成してよいですか？")
     )
       return;
+    document.dispatchEvent(new Event("post-changed"));
     dirty = false;
     try {
       (document.querySelector("#text") as HTMLTextAreaElement).value = generate(
@@ -190,7 +202,8 @@ function composer() {
         kind,
         value("operation"),
       );
-    } catch {
+    } catch (e) {
+      if (selected.size) status((e as Error).message);
       (document.querySelector("#text") as HTMLTextAreaElement).value = "";
     }
     updatePreview();
@@ -218,7 +231,9 @@ function composer() {
     const visible = state.products.filter(
       (p) =>
         fields.some((f) => p[f].toLocaleLowerCase().includes(query)) &&
-        (!month || kind !== 0 || p.arrivalDate.startsWith(month)),
+        (!month ||
+          kind !== 0 ||
+          (p.excel?.scheduledDate ?? p.arrivalDate).startsWith(month)),
     );
     document.querySelector("#selectionCount")!.textContent =
       `${selected.size}件選択 / ${visible.length}件表示`;
@@ -226,7 +241,7 @@ function composer() {
       visible
         .map(
           (p) =>
-            `<div class="item"><label><input type="checkbox" data-product="${escape(p.id)}" ${selected.has(p.id) ? "checked" : ""}>${escape(p.name)}<small>${escape([p.work, p.character, p.maker, p.arrivalDate || "入荷日未確認"].filter(Boolean).join(" / "))}</small></label></div>`,
+            `<div class="item"><label><input type="checkbox" data-product="${escape(p.id)}" ${selected.has(p.id) ? "checked" : ""}>${escape(p.name)}<small>${escape([p.work, p.character, p.maker, p.excel ? `稼働予定 ${p.excel.scheduledDate}（未確定） / ${p.status}` : p.arrivalDate || "入荷日未確認"].filter(Boolean).join(" / "))}</small></label></div>`,
         )
         .join("") ||
       '<p class="hint">該当商品がありません。下の商品マスターから登録してください。</p>';
@@ -355,6 +370,15 @@ function composer() {
   document.addEventListener("products-changed", () => {
     for (const id of selected)
       if (!state.products.some((p) => p.id === id)) selected.delete(id);
+    showProducts();
+    refreshTags();
+  });
+  document.addEventListener("excel-products-selected", (event) => {
+    const ids = (event as CustomEvent<string[]>).detail;
+    selected.clear();
+    ids.forEach((id) => selected.add(id));
+    (document.querySelector("#search") as HTMLInputElement).value = "";
+    (document.querySelector("#month") as HTMLInputElement).value = "";
     showProducts();
     refreshTags();
   });
@@ -570,3 +594,25 @@ function xActions() {
   );
 }
 document.addEventListener("app-ready", xActions, { once: true });
+
+import { mountExcel } from "./excel-ui";
+document.addEventListener(
+  "app-ready",
+  () => {
+    void mountExcel(document.querySelector<HTMLElement>("#excelHost")!, {
+      getState: () => state,
+      commit: async (next) => {
+        await save(next);
+        state = next;
+        renderMaster();
+        document.dispatchEvent(new Event("products-changed"));
+      },
+      select: (ids) =>
+        document.dispatchEvent(
+          new CustomEvent("excel-products-selected", { detail: ids }),
+        ),
+      notify: status,
+    });
+  },
+  { once: true },
+);

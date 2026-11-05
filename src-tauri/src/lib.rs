@@ -1,4 +1,5 @@
 mod storage;
+mod excel;
 use tauri::Manager;
 use std::sync::Mutex;
 
@@ -15,12 +16,18 @@ fn save_data(app: tauri::AppHandle, data: String, lock: tauri::State<'_, Mutex<(
     storage::save(&dir, &data).map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+fn read_excel(path: String) -> Result<tauri::ipc::Response, String> {
+    excel::read(std::path::Path::new(&path)).map(tauri::ipc::Response::new).map_err(|e| e.to_string())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .manage(Mutex::new(()))
         .plugin(tauri_plugin_opener::init())
-        .invoke_handler(tauri::generate_handler![load_data, save_data])
+        .plugin(tauri_plugin_dialog::init())
+        .invoke_handler(tauri::generate_handler![load_data, save_data, read_excel])
         .run(tauri::generate_context!())
         .expect("アプリを起動できませんでした");
 }
