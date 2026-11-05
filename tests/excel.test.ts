@@ -8,7 +8,13 @@ import {
   mergeExcel,
   checkArchive,
 } from "../src/excel";
-import { generate, hashtags, initialState, validateState } from "../src/domain";
+import {
+  productLine,
+  generate,
+  hashtags,
+  initialState,
+  validateState,
+} from "../src/domain";
 const headers = ["稼働予定日", "品名", "入数", "CS数", "メーカー"];
 async function fixture(
   rows: unknown[][],
@@ -64,14 +70,9 @@ test("xlsx日付セル・数量・メーカーを取り込み、予定と実際�
     },
   });
   expect(hashtags([p])).toBe("#メーカーA");
-  const text = generate(
-    "{products}",
-    { title: "", date: "", products: [p], note: "", hashtags: "" },
-    1,
-    "稼働中",
-  );
-  expect(text).toContain("予定日・稼働確定日ではありません");
-  expect(text).not.toContain("/ 稼働中");
+  const text = productLine(p);
+  expect(text).toBe("・景品A / 予定です（状態未確認）。");
+  expect(text).not.toContain("稼働中です");
   expect(() =>
     generate(
       "{products}",

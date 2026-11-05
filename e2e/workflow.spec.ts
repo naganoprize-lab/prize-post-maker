@@ -9,10 +9,13 @@ test("登録から生成・確認・履歴・リロードまで", async ({ page 
   await page.getByLabel("作品名", { exact: true }).fill("テスト作品");
   await page.getByRole("button", { name: "商品を保存", exact: true }).click();
   await expect(page.locator("#status")).toHaveText("商品を保存しました");
+  await page.locator('[data-kind="1"]').click();
+  await page.getByText("登録商品から選択", { exact: true }).click();
   await page.locator("[data-product]").check();
-  await expect(page.locator("#preview")).toContainText("テスト景品");
-  await expect(page.locator("#preview")).toContainText("入荷日未確認");
-  await expect(page.locator("#preview")).toContainText("#テスト作品");
+  await expect(page.locator("#threadPanel")).toContainText("テスト景品");
+  await expect(page.locator("#threadPanel")).toContainText("状態未確認");
+  await page.locator("#threadTags").check();
+  await expect(page.locator("#threadPanel")).toContainText("#テスト作品");
   await expect(page.locator("#copy")).toBeDisabled();
   await page.locator("#confirmed").check();
   await expect(page.locator("#copy")).toBeEnabled();

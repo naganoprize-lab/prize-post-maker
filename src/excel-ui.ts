@@ -24,9 +24,30 @@ const esc = (s: string) =>
       ]!,
   );
 export async function mountExcel(host: HTMLElement, ctx: Context) {
-  host.innerHTML = `<h2>Excelの商品を選択</h2><div id="excelSidebar"><details class="excel-panel" open><summary>Excel入荷予定表を読み込む</summary><div id="excelDrop" class="drop-zone" tabindex="0" role="group" aria-label="Excelファイルのドロップ領域"><p>.xlsm / .xlsx をドロップ</p><button id="chooseExcel">Excelファイルを選択</button><input id="excelFile" type="file" accept=".xlsm,.xlsx" hidden></div><p id="excelSource" class="hint"></p><button id="reloadExcel">元ファイルを再読み込み</button><p class="hint">VBA・数式は実行しません。稼働予定日は確定日ではありません。</p></details><fieldset id="excelSearch"><legend>日付・商品を検索</legend><label>単日カレンダー<input id="excelDay" type="date"></label><button id="findExcelDay">この日の商品を表示</button><label>開始日<input id="excelFrom" type="date"></label><label>終了日<input id="excelTo" type="date"></label><button id="findExcelRange">期間で検索</button><button id="showAllExcel">すべての日付を表示</button><label>商品名で絞り込み<input id="excelNameFilter" type="search"></label><label>メーカーで絞り込み<input id="excelMakerFilter" type="search"></label></fieldset></div><fieldset id="excelControls"><legend>Excel検索結果</legend><div class="row"><button id="selectAllExcel">表示商品を全選択</button><button id="clearExcelSelection">選択を解除</button></div><p id="excelResult" role="status"></p><div id="excelRows"></div><button id="addExcel" class="primary" disabled>選択した商品を追加</button><p class="hint">チェックした商品だけを投稿へ追加します。検索の変更でチェックを解除します。</p></fieldset>`;
+  host.innerHTML = `<h2>Excelの商品を選択</h2><div id="excelSidebar"><details class="excel-panel" open><summary>Excel入荷予定表を読み込む</summary><div id="excelDrop" class="drop-zone" tabindex="0" role="group" aria-label="Excelファイルのドロップ領域"><p>.xlsm / .xlsx をドロップ</p><button id="chooseExcel">Excelファイルを選択</button><input id="excelFile" type="file" accept=".xlsm,.xlsx" hidden></div><p id="excelSource" class="hint"></p><button id="reloadExcel">元ファイルを再読み込み</button><p class="hint">VBA・数式は実行しません。稼働予定日は確定日ではありません。</p></details><fieldset id="excelSearch"><legend>日付・商品を検索</legend><label>単日カレンダー<input id="excelDay" type="date"></label><button id="findExcelDay">この日の商品を表示</button><label>開始日<input id="excelFrom" type="date"></label><label>終了日<input id="excelTo" type="date"></label><button id="findExcelRange">期間で検索</button><button id="showAllExcel">すべての日付を表示</button><label>商品名で絞り込み<input id="excelNameFilter" type="search"></label><label>メーカーで絞り込み<input id="excelMakerFilter" type="search"></label></fieldset></div><fieldset id="excelControls"><legend>Excel検索結果</legend><div class="row"><button id="selectAllExcel">表示商品を全選択</button><button id="clearExcelSelection">選択を解除</button></div><p id="excelResult" role="status"></p><details class="column-settings"><summary>列幅を調整</summary><div class="row">${[
+    ["name", "商品名", 260, 160, 600],
+    ["maker", "メーカー", 100, 70, 240],
+    ["date", "予定日", 102, 90, 200],
+    ["status", "状態", 110, 95, 180],
+  ]
+    .map(
+      ([key, label, value, min, max]) =>
+        `<label>${label}<input type="range" data-column="${key}" value="${value}" min="${min}" max="${max}" aria-label="${label}の列幅"></label>`,
+    )
+    .join(
+      "",
+    )}</div></details><div id="excelRows" tabindex="0" aria-label="Excel商品一覧"></div><button id="addExcel" class="primary" disabled>選択した商品を追加</button><p class="hint">チェックした商品だけを投稿へ追加します。検索の変更でチェックを解除します。</p></fieldset>`;
   if (ctx.sidebar) ctx.sidebar.append(document.querySelector("#excelSidebar")!);
   const input = document.querySelector<HTMLInputElement>("#excelFile")!;
+  host.querySelectorAll<HTMLInputElement>("[data-column]").forEach(
+    (slider) =>
+      (slider.oninput = () => {
+        host.style.setProperty(
+          "--col-" + slider.dataset.column,
+          slider.value + "px",
+        );
+      }),
+  );
   const chosen = new Set<string>();
   let shown: Product[] = [];
   let range: { from: string; to: string } | null = null;
@@ -67,12 +88,7 @@ export async function mountExcel(host: HTMLElement, ctx: Context) {
         : "0件表示 / 0件選択 · 該当する稼働予定日の対象商品がありません",
     );
     const rows = document.querySelector("#excelRows")!;
-    rows.innerHTML = shown
-      .map(
-        (p) =>
-          `<article class="item"><label><input type="checkbox" data-excel-check="${esc(p.excel!.key)}" ${chosen.has(p.excel!.key) ? "checked" : ""}>${esc(p.excel!.originalName)}</label><small>元Excel ${p.excel!.rowNumber ?? "不明"}行目 / 稼働予定 ${esc(p.excel!.scheduledDate)}（未確定） / ${esc(p.maker)} / 入数 ${p.excel!.units ?? "未入力"} / CS数 ${p.excel!.cs ?? "未入力"}</small><label>投稿用商品名<input data-excel-name="${esc(p.excel!.key)}" value="${esc(p.name)}" maxlength="200" aria-label="投稿用商品名 ${esc(p.excel!.originalName)}"></label><label>商品状態<select data-excel-status="${esc(p.excel!.key)}" aria-label="商品状態 ${esc(p.excel!.originalName)}">${productStatuses.map((s) => `<option ${s === p.status ? "selected" : ""}>${s}</option>`).join("")}</select></label></article>`,
-      )
-      .join("");
+    rows.innerHTML = `<table class="product-table"><colgroup><col style="width:38px"><col style="width:var(--col-name,260px)"><col style="width:var(--col-maker,100px)"><col style="width:var(--col-date,102px)"><col style="width:var(--col-status,110px)"><col style="width:52px"><col style="width:52px"><col style="width:48px"></colgroup><thead><tr><th scope="col">選択</th><th scope="col">品名／投稿名</th><th scope="col">メーカー</th><th scope="col">稼働予定日</th><th scope="col">確認した状態</th><th scope="col">入数</th><th scope="col">CS数</th><th scope="col">元行</th></tr></thead><tbody>${shown.map((p) => `<tr><td><input type="checkbox" data-excel-check="${esc(p.excel!.key)}" ${chosen.has(p.excel!.key) ? "checked" : ""} aria-label="${esc(p.excel!.originalName)} ${p.excel!.rowNumber}行目を選択"></td><td><span class="formal-name">${esc(p.excel!.originalName)}</span><details class="name-edit"><summary>投稿名を編集</summary><input data-excel-name="${esc(p.excel!.key)}" value="${esc(p.name)}" maxlength="200" aria-label="投稿用商品名 ${esc(p.excel!.originalName)}"></details></td><td>${esc(p.maker)}</td><td>${esc(p.excel!.scheduledDate)}<small>予定</small></td><td><select data-excel-status="${esc(p.excel!.key)}" aria-label="商品状態 ${esc(p.excel!.originalName)}">${productStatuses.map((v) => `<option ${v === p.status ? "selected" : ""}>${v}</option>`).join("")}</select></td><td>${p.excel!.units ?? "—"}</td><td>${p.excel!.cs ?? "—"}</td><td>${p.excel!.rowNumber ?? "—"}</td></tr>`).join("")}</tbody></table>`;
     rows.querySelectorAll<HTMLInputElement>("[data-excel-check]").forEach(
       (c) =>
         (c.onchange = () => {
@@ -129,7 +145,7 @@ export async function mountExcel(host: HTMLElement, ctx: Context) {
   }
   function setBusy(value: boolean) {
     busy = value;
-    host
+    document
       .querySelectorAll<HTMLButtonElement>(
         "#excelSidebar button, #excelControls button",
       )

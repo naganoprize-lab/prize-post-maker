@@ -14,9 +14,9 @@
       {
         "title": "プライズポストメーカー",
         "width": 1280,
-        "height": 860,
-        "minWidth": 900,
-        "minHeight": 650
+        "height": 800,
+        "minWidth": 640,
+        "minHeight": 480
       }
     ],
     "security": {

@@ -25,6 +25,19 @@ fn read_excel(path: String) -> Result<tauri::ipc::Response, String> {
 pub fn run() {
     tauri::Builder::default()
         .manage(Mutex::new(()))
+        .setup(|app| {
+            if let Some(window) = app.get_webview_window("main") {
+                if let Ok(Some(monitor)) = window.current_monitor() {
+                    let area = monitor.work_area();
+                    let scale = monitor.scale_factor();
+                    let width = (area.size.width as f64 / scale).min(1280.0).max(640.0);
+                    let height = (area.size.height as f64 / scale - 48.0).min(800.0).max(480.0);
+                    let _ = window.set_size(tauri::LogicalSize::new(width, height));
+                    let _ = window.center();
+                }
+            }
+            Ok(())
+        })
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![load_data, save_data, read_excel])

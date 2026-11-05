@@ -1,3 +1,4 @@
+import { isTauri } from "@tauri-apps/api/core";
 import { countText } from "./domain";
 export function intentURL(text: string): string {
   if (!countText(text).valid)
@@ -23,4 +24,13 @@ export function validateImages(
     throw Error("画像は1枚あたり0バイト超〜5MB以下にしてください");
   if (files.some((f) => f.type === "image/gif") && files.length > 1)
     throw Error("GIFは単独で選択してください");
+}
+
+export async function openXComposer(text: string): Promise<void> {
+  const url = intentURL(text);
+
+  if (isTauri()) {
+    const { openUrl } = await import("@tauri-apps/plugin-opener");
+    await openUrl(url);
+  } else window.open(url, "_blank", "noopener,noreferrer");
 }

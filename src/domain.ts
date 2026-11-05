@@ -3,8 +3,9 @@ export const productStatuses = [
   "予定",
   "入荷済み",
   "稼働中",
+  "準備中",
   "完売",
-  "遅延",
+  "入荷遅延",
 ] as const;
 export type ProductStatus = (typeof productStatuses)[number];
 export interface ExcelMetadata {
@@ -87,9 +88,10 @@ export function product(input: unknown): Product {
   if (!(p.name as string).trim()) throw Error("商品名を入力してください");
   if (p.arrivalDate && !validDate(p.arrivalDate as string))
     throw Error("入荷日は実在する YYYY-MM-DD で入力してください");
+  const savedStatus = p.status === "遅延" ? "入荷遅延" : p.status;
   if (
-    p.status !== undefined &&
-    !productStatuses.includes(p.status as ProductStatus)
+    savedStatus !== undefined &&
+    !productStatuses.includes(savedStatus as ProductStatus)
   )
     throw Error("商品状態が不正です");
   if (
@@ -129,7 +131,7 @@ export function product(input: unknown): Product {
     excel = { ...e };
   }
   return {
-    ...(p.status !== undefined ? { status: p.status } : {}),
+    ...(savedStatus !== undefined ? { status: savedStatus } : {}),
     ...(excel ? { excel } : {}),
     ...(p.hashtags ? { hashtags: p.hashtags } : {}),
     id: typeof p.id === "string" && p.id ? p.id : crypto.randomUUID(),
@@ -283,55 +285,64 @@ export function hashtags(products: Product[]): string {
     .map((t) => "#" + t)
     .join(" ");
 }
+export const monthlyNotice =
+  "雑貨やぬいぐるみなど記載に無く入荷する景品や、後日入荷予定日が変更になる景品がある場合がございます。";
+export function monthlyPost(month: number): string {
+  if (!Number.isInteger(month) || month < 1 || month > 12)
+    throw Error("1月〜12月を選択してください");
+  return `✨万代書店長野店プライズコーナー✨${month}月入荷予定表✨\n\n${monthlyNotice}`;
+}
+export function dailyIntro(date: string): string {
+  if (!validDate(date)) throw Error("入荷案内の日付を選択してください");
+  const [, m, d] = date.split("-");
+  return `🆕万代書店長野店プライズ入荷情報🆕\n\n${Number(m)}月${Number(d)}日の入荷のお知らせです！詳細はツリーにて⬇️`;
+}
+export function productLine(p: Product): string {
+  const messages: Record<string, string> = {
+    予定: "予定です（状態未確認）。",
+    稼働中: "稼働中です。",
+    入荷済み: "入荷しました。",
+    準備中: "準備中です。",
+    完売: "完売しました。",
+    入荷遅延: "入荷が遅れています。",
+    遅延: "入荷が遅れています。",
+  };
+  return `・${p.name.replace(/[\r\n]+/g, " ")} / ${messages[p.status ?? "予定"] ?? messages["予定"]}`;
+}
+export interface PostValues {
+  title: string;
+  date: string;
+  products: Product[];
+  note: string;
+  hashtags: string;
+  month?: number;
+}
 export function generate(
   template: string,
-  values: {
-    title: string;
-    date: string;
-    products: Product[];
-    note: string;
-    hashtags: string;
-  },
+  values: PostValues,
   kind: number,
-  status = "入荷",
+  _status = "",
 ): string {
+  if (kind === 0) return monthlyPost(values.month!);
+  if (kind === 1) return dailyIntro(values.date);
   if (!values.products.length) throw Error("商品を1件以上選択してください");
   if (values.date && !validDate(values.date)) throw Error("日付が不正です");
-  const details = values.products
-    .map((p) => {
-      const info = [p.work, p.character, p.maker].filter(Boolean).join(" / ");
-      if (
-        p.excel &&
-        ((kind === 2 && p.status !== "完売") ||
-          (kind === 3 && p.status !== "遅延"))
-      )
-        throw Error(`${p.name}: 投稿種類に合う商品状態に変更してください`);
-      const suffix = p.excel
-        ? `稼働予定 ${p.excel.scheduledDate}（予定日・稼働確定日ではありません） / ${p.status ?? "予定"}`
-        : kind === 0
-          ? p.arrivalDate
-            ? `入荷予定 ${p.arrivalDate}`
-            : "入荷日未確認"
-          : kind === 1
-            ? status
-            : kind === 2
-              ? "完売"
-              : "入荷遅延（変更後の日程は備考を確認）";
-      return `・${p.name}${info ? `（${info}）` : ""}\n  ${suffix}`;
-    })
-    .join("\n");
+  for (const p of values.products)
+    if (
+      (kind === 2 && p.status !== "完売") ||
+      (kind === 3 && p.status !== "入荷遅延")
+    )
+      throw Error(`${p.name}: 投稿種類に合う商品状態に変更してください`);
   const dict = {
     ...values,
-    products: details,
+    products: values.products.map(productLine).join("\n"),
     count: String(values.products.length),
-    date: values.date
-      ? `${kind === 0 ? "ご案内日" : "対象日"}: ${values.date}`
-      : "",
+    date: values.date ? `対象日: ${values.date}` : "",
   };
   return template
     .replace(
       /\{(title|date|products|note|hashtags|count)\}/g,
-      (_, key: keyof typeof dict) => dict[key],
+      (_, key: keyof typeof dict) => String(dict[key]),
     )
     .replace(/\n{3,}/g, "\n\n")
     .trim();
