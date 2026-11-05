@@ -36,3 +36,24 @@ export function validateState(input:unknown):State {
  for(const h of s.history) if(!h||typeof h.id!=='string'||typeof h.kind!=='string'||typeof h.text!=='string'||typeof h.createdAt!=='string'||isNaN(Date.parse(h.createdAt))) throw Error('履歴が不正です');
  return {...s,products};
 }
+
+import twitter from 'twitter-text';
+export function titles(kind:number):string[] {
+ return [['今月の入荷予定のお知らせ','月間プライズ入荷予定','これからの入荷予定をご案内'],['本日の入荷・稼働情報','プライズ入荷・稼働のお知らせ','本日のプライズ情報'],['完売のお知らせ','対象景品の完売のご案内','プライズ完売情報'],['入荷遅延のお知らせ','対象景品の入荷予定変更','入荷遅延のご案内']][kind]??[];
+}
+export function hashtags(products:Product[]):string {
+ const tags=products.flatMap(p=>[p.work,p.character,p.maker]).map(s=>s.normalize('NFKC').replace(/[^\p{L}\p{N}\p{M}_]/gu,'')) .filter(s=>s&&twitter.extractHashtags('#'+s).includes(s));
+ return [...new Set(tags)].slice(0,12).map(t=>'#'+t).join(' ');
+}
+export function generate(template:string,values:{title:string;date:string;products:Product[];note:string;hashtags:string},kind:number,status='入荷'):string {
+ if(!values.products.length) throw Error('商品を1件以上選択してください');
+ if(values.date&&!validDate(values.date))throw Error('日付が不正です');
+ const details=values.products.map(p=>{
+  const info=[p.work,p.character,p.maker].filter(Boolean).join(' / ');
+  const suffix=kind===0?(p.arrivalDate?`入荷予定 ${p.arrivalDate}`:'入荷日未確認'):kind===1?status:kind===2?'完売':'入荷遅延（変更後の日程は備考を確認）';
+  return `・${p.name}${info?`（${info}）`:''}\n  ${suffix}`;
+ }).join('\n');
+ const dict={...values,products:details,date:values.date?`${kind===0?'ご案内日':'対象日'}: ${values.date}`:''};
+ return template.replace(/\{(title|date|products|note|hashtags)\}/g,(_,key:keyof typeof dict)=>dict[key]).replace(/\n{3,}/g,'\n\n').trim();
+}
+export function countText(text:string){const p=twitter.parseTweet(text);return {weighted:p.weightedLength,valid:p.valid};}

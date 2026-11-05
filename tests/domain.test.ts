@@ -6,3 +6,11 @@ test('商品名と日付を検証する',()=>{expect(()=>product({...p,name:' '}
 test('不正なCSVを部分取込しない',()=>{expect(()=>importCSV('name,work,character,maker,arrivalDate\nA,,,,\nB,,,,bad')).toThrow('3行目');expect(()=>importCSV('name\nA')).toThrow('ヘッダー');});
 test('表計算式を無害化する',()=>{expect(exportCSV([{...p,name:'=1+1'}])).toContain("'=1+1");});
 test('保存データを検証する',()=>{expect(validateState(initialState()).version).toBe(1);expect(()=>validateState({version:99})).toThrow();expect(()=>validateState({...initialState(),products:[p,p]})).toThrow('重複');});
+import {generate,hashtags,titles,countText} from '../src/domain';
+test('4種類の候補と事実に基づく生成',()=>{
+ for(let kind=0;kind<4;kind++) {expect(titles(kind).length).toBeGreaterThan(1);const text=generate('{title}\n{products}\n{date}\n{note}',{title:titles(kind)[0],date:'',products:[{...p,arrivalDate:''}],note:'',hashtags:''},kind);expect(text).toContain(p.name);expect(text).not.toContain('2026-11-05');if(kind===0)expect(text).toContain('入荷日未確認');}
+ expect(()=>generate('{products}',{title:'',date:'',products:[],note:'',hashtags:''},0)).toThrow('選択');
+});
+test('変数に入った変数文字列を再解釈しない',()=>{expect(generate('{title}',{title:'{note}',date:'',products:[p],note:'秘密',hashtags:''},0)).toBe('{note}');});
+test('ハッシュタグは重複除去し空白記号を取り除く',()=>{expect(hashtags([p,p])).toBe('#作品 #主人公 #メーカー');});
+test('Xの日本語・URL・絵文字の重み',()=>{expect(countText('あ'.repeat(140)).valid).toBe(true);expect(countText('あ'.repeat(141)).valid).toBe(false);expect(countText('https://example.com/very-long-path').weighted).toBe(23);expect(countText('👨‍👩‍👧‍👦').weighted).toBe(2);expect(countText('').valid).toBe(false);});
