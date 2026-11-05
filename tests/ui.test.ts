@@ -11,6 +11,7 @@ test("商品選択・投稿生成・編集・種類切替・テーマ保存", as
       character: "キャラ",
       maker: "メーカー",
       arrivalDate: "",
+      status: "完売",
     },
   ];
   localStorage.setItem("prize-post-maker-v1", JSON.stringify(state));
@@ -20,9 +21,11 @@ test("商品選択・投稿生成・編集・種類切替・テーマ保存", as
   const checkbox = document.querySelector<HTMLInputElement>("[data-product]")!;
   checkbox.checked = true;
   checkbox.dispatchEvent(new Event("change"));
-  expect(document.querySelector("#preview")?.textContent).toContain("登録景品");
   expect(document.querySelector("#preview")?.textContent).toContain(
-    "入荷日未確認",
+    "入荷予定表",
+  );
+  expect(document.querySelector("#preview")?.textContent).not.toContain(
+    "登録景品",
   );
   (document.querySelector('[data-kind="2"]') as HTMLButtonElement).click();
   expect(document.querySelector("#heading")?.textContent).toBe(

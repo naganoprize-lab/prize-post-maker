@@ -184,7 +184,7 @@ export const ready = load()
     );
   });
 
-import { titles, hashtags, generate, countText } from "./domain";
+import { titles, hashtags, countText, productStatuses } from "./domain";
 let kind = 0;
 const selected = new Set<string>();
 function orderedSelected() {
@@ -194,9 +194,40 @@ function orderedSelected() {
     .filter((p): p is import("./domain").Product => Boolean(p));
 }
 let dirty = false;
+let postQueue: string[] = [];
+let activePost = 0;
+function refreshThread() {
+  const host = document.querySelector<HTMLElement>("#threadPanel");
+  if (!host) return;
+  renderThread(
+    host,
+    postQueue,
+    activePost,
+    (i) => {
+      activePost = i;
+      (document.querySelector("#text") as HTMLTextAreaElement).value =
+        postQueue[i];
+      updatePreview();
+    },
+    (i, d) => {
+      const j = i + d;
+      if (j < 0 || j >= postQueue.length) return;
+      [postQueue[i], postQueue[j]] = [postQueue[j], postQueue[i]];
+      activePost = j;
+      (document.querySelector("#text") as HTMLTextAreaElement).value =
+        postQueue[j];
+      updatePreview();
+    },
+    status,
+  );
+}
 function composer() {
   document.querySelector("#composer")!.innerHTML =
-    `<div class="card" id="manualProducts"><h2>登録商品から選択</h2><label>商品を検索<input id="search" placeholder="商品名・作品・キャラクター・メーカー"></label><label>月間予定の対象月（任意）<input id="month" type="month"></label><div class="row"><button id="selectVisible">表示商品をすべて選択</button><button id="clearSelected">選択解除</button></div><p id="selectionCount" class="hint"></p><div id="products"></div></div><div class="card" id="postSettings"><h2>投稿を設定</h2><label>タイトル候補<select id="titles"></select></label><label>タイトル<input id="title" maxlength="200"></label><label>対象日／ご案内日（任意）<input id="date" type="date"></label><label id="operationLabel">当日の状態<select id="operation"><option>入荷</option><option>稼働中</option><option>入荷・稼働中</option></select></label><label>備考（確認済みの情報のみ）<textarea id="note" maxlength="2000" placeholder="遅延後の日程が未定の場合は「変更後の日程は未定です」など、確認できた事実を入力"></textarea></label><label>テンプレート<select id="templates"></select></label><label>テンプレート本文<textarea id="templateBody" maxlength="10000"></textarea></label><p class="hint">利用できる変数: {title} {date} {products} {note} {hashtags} {count}</p><div class="row"><input id="templateName" maxlength="100" placeholder="テンプレート名" aria-label="テンプレート名"><button id="saveTemplate">新規保存</button><button id="updateTemplate">上書き保存</button><button id="deleteTemplate">削除</button></div><label>ハッシュタグ（編集可能）<textarea id="tags" maxlength="2000"></textarea></label><button id="autoTags">選択商品のタグを再生成</button></div><div class="card" id="postText"><h2>最終文章を確認</h2><label>投稿文章（直接編集できます）<textarea id="text" maxlength="10000" rows="9"></textarea></label><p class="hint">設定変更で生成文に戻ります。手動編集済みの場合は確認します。</p><button id="regenerate">設定から文章を再生成</button></div><details><summary>作成履歴（投稿済みを意味しません・直近200件）</summary><div id="history"></div></details>`;
+    `<details class="card" id="manualProducts"><summary>登録商品から選択</summary><label>商品を検索<input id="search" placeholder="商品名・作品・キャラクター・メーカー"></label><label>月間予定の対象月（任意）<input id="month" type="month"></label><div class="row"><button id="selectVisible">表示商品をすべて選択</button><button id="clearSelected">選択解除</button></div><p id="selectionCount" class="hint"></p><div id="products"></div></details><div class="card" id="postSettings"><h2>投稿を設定</h2><label id="postMonthLabel">入荷予定表の月<select id="postMonth">${Array.from({ length: 12 }, (_, i) => `<option value="${i + 1}">${i + 1}月</option>`).join("")}</select></label><p id="fixedHint" class="hint">月間・日別の案内文は指定の店舗文です。商品一覧は月間本文に挿入しません。</p><details id="customSettings"><summary>タイトル・テンプレート設定（完売・遅延用）</summary><label>タイトル候補<select id="titles"></select></label><label>タイトル<input id="title" maxlength="200"></label></details><label id="postDateLabel">対象日／ご案内日<input id="date" type="date"></label><label id="operationLabel">選択商品の状態を一括指定<select id="operation"><option value="">変更しない</option>${productStatuses.map((s) => `<option>${s}</option>`).join("")}</select></label><details id="advancedSettings"><summary>備考・テンプレート・タグ（必要な場合）</summary><label>備考（確認済みの情報のみ）<textarea id="note" maxlength="2000" placeholder="遅延後の日程が未定の場合は「変更後の日程は未定です」など、確認できた事実を入力"></textarea></label><label>テンプレート<select id="templates"></select></label><label>テンプレート本文<textarea id="templateBody" maxlength="10000"></textarea></label><p class="hint">利用できる変数: {title} {date} {products} {note} {hashtags} {count}</p><div class="row"><input id="templateName" maxlength="100" placeholder="テンプレート名" aria-label="テンプレート名"><button id="saveTemplate">新規保存</button><button id="updateTemplate">上書き保存</button><button id="deleteTemplate">削除</button></div><label>ハッシュタグ（編集可能）<textarea id="tags" maxlength="2000"></textarea></label><button id="autoTags">選択商品のタグを再生成</button></details><label id="threadTagsLabel"><input id="threadTags" type="checkbox">商品紹介の末尾にタグを付ける（任意）</label></div><div id="generationError" class="danger" role="alert"></div><div class="card" id="postText"><h2>最終文章を確認</h2><label>投稿文章（直接編集できます）<textarea id="text" maxlength="10000" rows="4"></textarea></label><p class="hint">設定変更で生成文に戻ります。手動編集済みの場合は確認します。</p><button id="regenerate">設定から文章を再生成</button><div id="threadPanel"></div></div><details><summary>作成履歴（投稿済みを意味しません・直近200件）</summary><div id="history"></div></details>`;
+  (document.querySelector("#postMonth") as HTMLSelectElement).value = String(
+    Number(todayTokyo().slice(5, 7)),
+  );
+  (document.querySelector("#date") as HTMLInputElement).value = todayTokyo();
   const value = (id: string) =>
     (document.getElementById(id) as HTMLInputElement).value;
   function regenerate(force = false) {
@@ -209,20 +240,29 @@ function composer() {
     document.dispatchEvent(new Event("post-changed"));
     dirty = false;
     try {
-      (document.querySelector("#text") as HTMLTextAreaElement).value = generate(
-        value("templateBody"),
+      postQueue = composePosts(
+        kind,
         {
           title: value("title"),
           date: value("date"),
+          month: Number(value("postMonth")),
           products: orderedSelected(),
           note: value("note"),
           hashtags: value("tags"),
         },
-        kind,
-        value("operation"),
+        value("templateBody"),
+        (document.querySelector("#threadTags") as HTMLInputElement).checked,
       );
+      activePost = 0;
+      (document.querySelector("#text") as HTMLTextAreaElement).value =
+        postQueue[0] ?? "";
+      document.querySelector("#generationError")!.textContent = "";
     } catch (e) {
-      if (selected.size) status((e as Error).message);
+      postQueue = [];
+      activePost = 0;
+      document.querySelector("#generationError")!.textContent = (
+        e as Error
+      ).message;
       (document.querySelector("#text") as HTMLTextAreaElement).value = "";
     }
     renderAdded();
@@ -231,7 +271,14 @@ function composer() {
   function renderAdded() {
     const products = orderedSelected();
     document.querySelector("#addedProducts")!.innerHTML =
-      `<h2>投稿に追加済みの商品（${products.length}件）</h2><p class="hint">ここにある商品だけで投稿を作成します。</p><div id="addedList">${products.map((p, i) => `<article class="item" data-added="${escape(p.id)}"><strong>${escape(p.name)}</strong><small>${escape(p.excel ? `元品名: ${p.excel.originalName} / ${p.excel.rowNumber ?? "不明"}行目 / ${p.excel.scheduledDate}（予定） / 入数 ${p.excel.units ?? "未入力"} / CS数 ${p.excel.cs ?? "未入力"}` : p.maker)}</small><div class="row"><button data-move="${escape(p.id)}" data-direction="-1" ${i === 0 ? "disabled" : ""} aria-label="${escape(p.name)}を上へ">上へ</button><button data-move="${escape(p.id)}" data-direction="1" ${i === products.length - 1 ? "disabled" : ""} aria-label="${escape(p.name)}を下へ">下へ</button><button data-remove-added="${escape(p.id)}" aria-label="${escape(p.name)}を投稿から削除">投稿から削除</button></div></article>`).join("") || '<p class="hint">中央で商品にチェックを入れて追加してください。</p>'}</div>`;
+      `<h2>投稿に追加済みの商品（${products.length}件）</h2><p class="hint">ここにある商品だけで投稿を作成します。</p><div id="addedList">${products.map((p, i) => `<article class="item" data-added="${escape(p.id)}"><strong>${escape(p.name)}</strong><details class="source-info"><summary>元の商品情報</summary><small>${escape(p.excel ? `元品名: ${p.excel.originalName} / ${p.excel.rowNumber ?? "不明"}行目 / ${p.excel.scheduledDate}（予定） / 入数 ${p.excel.units ?? "未入力"} / CS数 ${p.excel.cs ?? "未入力"}` : p.maker)}</small></details><label>確認した商品状態<select data-added-status="${escape(p.id)}" aria-label="${escape(p.name)}の状態">${productStatuses.map((v) => `<option ${v === (p.status ?? "予定") ? "selected" : ""}>${v}</option>`).join("")}</select></label><div class="row"><button data-move="${escape(p.id)}" data-direction="-1" ${i === 0 ? "disabled" : ""} aria-label="${escape(p.name)}を上へ">上へ</button><button data-move="${escape(p.id)}" data-direction="1" ${i === products.length - 1 ? "disabled" : ""} aria-label="${escape(p.name)}を下へ">下へ</button><button data-remove-added="${escape(p.id)}" aria-label="${escape(p.name)}を投稿から削除">投稿から削除</button></div></article>`).join("") || '<p class="hint">中央で商品にチェックを入れて追加してください。</p>'}</div>`;
+    document
+      .querySelectorAll<HTMLSelectElement>("[data-added-status]")
+      .forEach(
+        (c) =>
+          (c.onchange = () =>
+            void changeStatuses([c.dataset.addedStatus!], c.value)),
+      );
     document.querySelectorAll<HTMLButtonElement>("[data-remove-added]").forEach(
       (b) =>
         (b.onclick = () => {
@@ -255,6 +302,24 @@ function composer() {
         }),
     );
   }
+  async function changeStatuses(ids: string[], value: string) {
+    const previous = state.products;
+    state.products = state.products.map((p) =>
+      ids.includes(p.id) ? product({ ...p, status: value }) : p,
+    );
+    try {
+      await persist();
+      document.dispatchEvent(new Event("products-changed"));
+    } catch (e) {
+      state.products = previous;
+      status((e as Error).message);
+      renderAdded();
+    }
+  }
+  document.querySelector<HTMLSelectElement>("#operation")!.onchange = () => {
+    const v = value("operation");
+    if (v) void changeStatuses([...selected], v);
+  };
   function populateTemplates() {
     (document.querySelector("#templates") as HTMLSelectElement).innerHTML =
       state.templates
@@ -323,7 +388,28 @@ function composer() {
     (document.querySelector("#title") as HTMLInputElement).value =
       titles(kind)[0];
     (document.querySelector("#operationLabel") as HTMLElement).hidden =
+      kind === 0;
+    (document.querySelector("#postMonthLabel") as HTMLElement).hidden =
+      kind !== 0;
+    (document.querySelector("#postDateLabel") as HTMLElement).hidden =
+      kind === 0;
+    (document.querySelector("#customSettings") as HTMLElement).hidden =
+      kind < 2;
+    (document.querySelector("#threadTagsLabel") as HTMLElement).hidden =
       kind !== 1;
+    (document.querySelector("#fixedHint") as HTMLElement).hidden = kind >= 2;
+    (document.querySelector("#advancedSettings") as HTMLElement).hidden =
+      kind === 0;
+    for (const id of ["note", "templates", "templateBody"])
+      (document.getElementById(id)!.parentElement as HTMLElement).hidden =
+        kind < 2;
+    (
+      document.querySelector("#templateName")!.parentElement as HTMLElement
+    ).hidden = kind < 2;
+    document.querySelector("#advancedSettings summary")!.textContent =
+      kind === 1
+        ? "ハッシュタグ（任意）"
+        : "備考・テンプレート・タグ（必要な場合）";
     (document.querySelector("#month")!.parentElement as HTMLElement).hidden =
       kind !== 0;
     showProducts();
@@ -340,7 +426,15 @@ function composer() {
       value("titles");
     regenerate();
   });
-  ["title", "date", "operation", "note", "templateBody", "tags"].forEach((id) =>
+  [
+    "title",
+    "date",
+    "note",
+    "templateBody",
+    "tags",
+    "postMonth",
+    "threadTags",
+  ].forEach((id) =>
     document.getElementById(id)!.addEventListener("input", () => regenerate()),
   );
   document.querySelector("#text")!.addEventListener("input", () => {
@@ -446,6 +540,8 @@ function composer() {
         (b.onclick = () => {
           const h = state.history.find((h) => h.id === b.dataset.history)!;
           if (dirty && !confirm("編集中の文章を履歴で置き換えますか？")) return;
+          postQueue = [h.text];
+          activePost = 0;
           (document.querySelector("#text") as HTMLTextAreaElement).value =
             h.text;
           dirty = true;
@@ -479,6 +575,12 @@ function composer() {
 function updatePreview() {
   const text =
     (document.querySelector("#text") as HTMLTextAreaElement)?.value ?? "";
+  if (postQueue.length) postQueue[activePost] = text;
+  else if (text.trim()) {
+    postQueue = [text];
+    activePost = 0;
+  }
+  refreshThread();
   document.querySelector("#preview")!.textContent =
     text || "商品を選択すると文章が表示されます。";
   const count = countText(text);
@@ -492,6 +594,7 @@ function startup() {
   const postEditor = document.querySelector("#postEditor")!;
   postEditor.append(
     document.querySelector("#postSettings")!,
+    document.querySelector("#generationError")!,
     document.querySelector("#postText")!,
   );
   document.documentElement.dataset.theme = state.theme;
@@ -533,6 +636,7 @@ function xActions() {
   }
   function reset() {
     confirmed.checked = false;
+    refreshThread();
     enabled();
   }
   document.addEventListener("post-changed", reset);
@@ -674,3 +778,6 @@ document.addEventListener(
 );
 
 import { moveProduct, appendUnique } from "./selection";
+
+import { composePosts, todayTokyo } from "./posts";
+import { renderThread } from "./thread-ui";

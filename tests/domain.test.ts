@@ -43,28 +43,30 @@ test("保存データを検証する", () => {
 });
 import { generate, hashtags, titles, countText } from "../src/domain";
 test("4種類の候補と事実に基づく生成", () => {
-  for (let kind = 0; kind < 4; kind++) {
+  for (let kind = 2; kind < 4; kind++) {
     expect(titles(kind).length).toBeGreaterThan(1);
     const text = generate(
       "{title}\n{products}\n{date}\n{note}",
       {
         title: titles(kind)[0],
         date: "",
-        products: [{ ...p, arrivalDate: "" }],
+        products: [
+          { ...p, arrivalDate: "", status: kind === 2 ? "完売" : "入荷遅延" },
+        ],
         note: "",
         hashtags: "",
       },
       kind,
     );
-    expect(text).toContain(p.name);
+    expect(text).toContain(p.name.replace(/\n/g, " "));
     expect(text).not.toContain("2026-11-05");
-    if (kind === 0) expect(text).toContain("入荷日未確認");
+    expect(text).not.toContain("メーカー");
   }
   expect(() =>
     generate(
       "{products}",
       { title: "", date: "", products: [], note: "", hashtags: "" },
-      0,
+      2,
     ),
   ).toThrow("選択");
 });
@@ -72,8 +74,14 @@ test("変数に入った変数文字列を再解釈しない", () => {
   expect(
     generate(
       "{title}",
-      { title: "{note}", date: "", products: [p], note: "秘密", hashtags: "" },
-      0,
+      {
+        title: "{note}",
+        date: "",
+        products: [{ ...p, status: "完売" }],
+        note: "秘密",
+        hashtags: "",
+      },
+      2,
     ),
   ).toBe("{note}");
 });
@@ -88,13 +96,13 @@ test("Xの日本語・URL・絵文字の重み", () => {
   expect(countText("").valid).toBe(false);
 });
 test("登録したタグと商品数を選択商品の生成へ反映する", () => {
-  const registered = product({ ...p, hashtags: ["店舗タグ"] });
+  const registered = product({ ...p, status: "完売", hashtags: ["店舗タグ"] });
   expect(hashtags([registered])).toContain("#店舗タグ");
   expect(
     generate(
       "{count}商品\n{products}",
       { title: "", date: "", products: [registered], note: "", hashtags: "" },
-      0,
+      2,
     ),
   ).toContain("1商品");
   expect(() => product({ ...p, hashtags: [123] })).toThrow("ハッシュタグ");

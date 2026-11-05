@@ -32,6 +32,7 @@ test("Excelの取込・日付抽出・編集・一括追加・再読込重複防
       externalRequests.push(r.url());
   });
   await page.goto("/");
+  await page.locator('[data-kind="1"]').click();
   await page.getByText("Excel入荷予定表を読み込む", { exact: true }).click();
   const buffer = await workbook();
   await page.locator("#excelFile").setInputFiles({
@@ -44,6 +45,11 @@ test("Excelの取込・日付抽出・編集・一括追加・再読込重複防
   await expect(page.locator("#excelResult")).toHaveText("2件表示 / 0件選択");
   await page
     .getByRole("button", { name: "表示商品を全選択", exact: true })
+    .click();
+  await page
+    .locator("#excelRows tr")
+    .filter({ has: page.getByLabel("投稿用商品名 元の景品A", { exact: true }) })
+    .getByText("投稿名を編集", { exact: true })
     .click();
   await page
     .getByLabel("投稿用商品名 元の景品A", { exact: true })
@@ -61,12 +67,12 @@ test("Excelの取込・日付抽出・編集・一括追加・再読込重複防
   await page
     .getByRole("button", { name: "選択した商品を追加", exact: true })
     .click();
-  await expect(page.locator("#preview")).toContainText("投稿用の景品A");
-  await expect(page.locator("#preview")).toContainText("元の景品B");
-  await expect(page.locator("#preview")).toContainText(
-    "稼働確定日ではありません",
+  await expect(page.locator("#threadPanel")).toContainText("投稿用の景品A");
+  await expect(page.locator("#threadPanel")).toContainText("元の景品B");
+  await expect(page.locator("#threadPanel")).toContainText(
+    "予定です（状態未確認）。",
   );
-  await expect(page.locator("#preview")).not.toContainText("別日の景品");
+  await expect(page.locator("#threadPanel")).not.toContainText("別日の景品");
   await expect(page.locator("#products [data-product]")).toHaveCount(2);
   // 同じファイルを読み直しても投稿名・状態が残り、マスターが増えない。
   await page.locator("#excelFile").setInputFiles({
@@ -100,6 +106,7 @@ test("Excelの取込・日付抽出・編集・一括追加・再読込重複防
 });
 test("Excelのドロップと読込失敗時の既存データ保護", async ({ page }) => {
   await page.goto("/");
+  await page.locator('[data-kind="1"]').click();
   await page.getByText("Excel入荷予定表を読み込む", { exact: true }).click();
   const data = Array.from(await workbook());
   await page.evaluate((bytes) => {
@@ -128,6 +135,7 @@ test("チェックした商品だけを追加し、日付変更・再追加・�
   page,
 }) => {
   await page.goto("/");
+  await page.locator('[data-kind="1"]').click();
   await page.locator("#excelFile").setInputFiles({
     name: "選択テスト.xlsx",
     mimeType: "application/octet-stream",
@@ -145,7 +153,7 @@ test("チェックした商品だけを追加し、日付変更・再追加・�
   await expect(page.locator("#addedList [data-added]")).toHaveCount(1);
   await expect(page.locator("#addedList")).toContainText("元の景品A");
   await expect(page.locator("#addedList")).not.toContainText("元の景品B");
-  await expect(page.locator("#preview")).not.toContainText("元の景品B");
+  await expect(page.locator("#threadPanel")).not.toContainText("元の景品B");
   await expect(page.locator("#products [data-product]")).toHaveCount(1);
   // 追加後も自動では次の商品を選ばない。
   await expect(page.locator("#addExcel")).toBeDisabled();
@@ -167,13 +175,13 @@ test("チェックした商品だけを追加し、日付変更・再追加・�
   await expect(page.locator("#addedList [data-added]").first()).toContainText(
     "別日の景品",
   );
-  const text = await page.locator("#preview").innerText();
+  const text = await page.locator("#threadPanel").innerText();
   expect(text.indexOf("別日の景品")).toBeLessThan(text.indexOf("元の景品A"));
   await page
     .getByRole("button", { name: "元の景品Aを投稿から削除", exact: true })
     .click();
   await expect(page.locator("#addedList [data-added]")).toHaveCount(1);
-  await expect(page.locator("#preview")).not.toContainText("元の景品A");
+  await expect(page.locator("#threadPanel")).not.toContainText("元の景品A");
   await page.locator("#excelDay").fill("2026-11-05");
   await page.locator("[data-excel-check]").nth(1).check();
   await page.locator("#addExcel").click();
@@ -197,6 +205,7 @@ test("添付実ファイルの135件から指定日のチェックした1件だ�
   test.skip(!path, "添付のローカル検証用ファイルはCIへ持ち込まない");
   await page.setViewportSize({ width: 1440, height: 1000 });
   await page.goto("/");
+  await page.locator('[data-kind="1"]').click();
   await page.locator("#excelFile").setInputFiles(path!);
   await expect(page.locator("#excelResult")).toHaveText("135件表示 / 0件選択");
   await expect(page.locator("#addExcel")).toBeDisabled();
@@ -210,7 +219,7 @@ test("添付実ファイルの135件から指定日のチェックした1件だ�
   await page.locator("#addExcel").click();
   await expect(page.locator("#addedList [data-added]")).toHaveCount(1);
   await expect(page.locator("#products [data-product]")).toHaveCount(1);
-  await expect(page.locator("#preview")).toContainText(firstName);
+  await expect(page.locator("#threadPanel")).toContainText(firstName);
   if (process.env.EXCEL_SCREENSHOT)
     await page.screenshot({
       path: process.env.EXCEL_SCREENSHOT,
